@@ -33,11 +33,13 @@ scene.add(dirLight);
 
 // ---- parameters ----
 const R = Math.tan(Math.PI / 6);  // side-to-side width = 1
-const spacing = 0.01;             // hex grid resolution
+const resolution = 100;
+const spacing = R / resolution;
+// const spacing = 0.01;             // hex grid resolution
 const rCross  = 0.3;              // tube radius for torus\ nconst rCross = 0.3;                // tube radius for torus
 
 // ---- flat hexagon ----
-const hexGeom = createHexGeometry(R, spacing);
+const hexGeom = createHexGeometry(R, resolution);
 hexGeom.computeVertexNormals();
 
 const planeMat = new THREE.MeshBasicMaterial({
@@ -55,11 +57,11 @@ scene.add(planePoints);
 
 // ---- twisted torus surface ----
 // build the base hex geometry and apply the twist
-const rawTorusGeom = createHexGeometry(R, spacing);
+const rawTorusGeom = createHexGeometry(R, resolution);
 applyTwistedTorus(rawTorusGeom, rCross);
 
 // properly weld the seam by merging vertices into a new geometry
-const torusGeom = mergeVertices(rawTorusGeom, 1e-6);
+const torusGeom = mergeVertices(rawTorusGeom, 0.001);
 torusGeom.computeVertexNormals();
 
 // surface mesh
@@ -140,10 +142,13 @@ function rot2d(x, y, a) {
   ];
 }
 
-function createHexGeometry(R, spacing, tol = 1e-6) {
+function createHexGeometry(R, n, tol = 1e-6) {
+
+  const spacing = R/n;
+
   const a = [spacing, 0];
   const b = [spacing / 2, spacing * Math.sqrt(3) / 2];
-  const n = Math.ceil(R / spacing);
+  // const n = Math.ceil(R / spacing);
   const pts = [];
   const rot = Math.PI / 6; // align hexagon
 

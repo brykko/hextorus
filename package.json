@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "delaunator": "^5.0.1",
+    "delaunay-triangulate": "^1.1.6",
     "three": "^0.176.0"
   }
 }
