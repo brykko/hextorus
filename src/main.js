@@ -6,6 +6,7 @@ import Delaunator from 'delaunator';
 // rendering mode: 'surface' or 'points'
 let renderMode = 'surface';
 let planePoints, torusPoints;
+let boundingLines;
 
 // scene + camera + renderer
 const scene = new THREE.Scene();
@@ -63,6 +64,24 @@ torusPoints = new THREE.Points(torusGeom, pointMat.clone());
 torusPoints.visible = false;
 scene.add(torusPoints);
 
+// bounding box lines at x = ±0.5, y = ±0.5 on the flat plane
+const bbGeom = new THREE.BufferGeometry();
+const bbVerts = new Float32Array([
+  -0.5, -0.5, 0,
+  -0.5,  0.5, 0,
+   0.5, -0.5, 0,
+   0.5,  0.5, 0,
+  -0.5, -0.5, 0,
+   0.5, -0.5, 0,
+  -0.5,  0.5, 0,
+   0.5,  0.5, 0
+]);
+bbGeom.setAttribute('position', new THREE.BufferAttribute(bbVerts, 3));
+const bbMat = new THREE.LineBasicMaterial({ color: 0x000000 });
+boundingLines = new THREE.LineSegments(bbGeom, bbMat);
+boundingLines.visible = false;
+scene.add(boundingLines);
+
 // animation timeline (simple)
 function setVisible(plane, torus) {
   if (renderMode === 'surface') {
@@ -70,11 +89,13 @@ function setVisible(plane, torus) {
     torusMesh.visible = torus;
     planePoints.visible = false;
     torusPoints.visible = false;
+    boundingLines.visible = plane;
   } else {
     planeMesh.visible = false;
     torusMesh.visible = false;
     planePoints.visible = plane;
     torusPoints.visible = torus;
+    boundingLines.visible = false;
   }
 }
 
@@ -108,12 +129,21 @@ function animate() {
 }
 animate();
 
+function rot2d(x, y, a) {
+  const xr = x*Math.cos(a) - y*Math.sin(a);
+  const yr = y*Math.cos(a) + x*Math.sin(a);
+  return [xr, yr];
+}
+
 // --- geometry helpers ---
 function createHexGeometry(R, spacing, tol = 1e-6) {
   const a = [spacing, 0];
   const b = [spacing/2, spacing * Math.sqrt(3)/2];
   const nSteps = Math.ceil(R/spacing);
   const points = [];
+
+  // The hegaxon needs to be rotated by pi/6 to align with the torus axes
+  const rot = Math.PI / 6;
 
   for (let i = -nSteps; i <= nSteps; i++) {
     for (let j = -nSteps; j <= nSteps; j++) {
@@ -124,7 +154,8 @@ function createHexGeometry(R, spacing, tol = 1e-6) {
         Math.abs(y) <= Math.sqrt(3)*R/2 + tol &&
         Math.abs(x)*Math.sqrt(3) + Math.abs(y) <= Math.sqrt(3)*R + tol
       ) {
-        points.push([x, y]);
+        const [xr, yr] = rot2d(x, y, rot);
+        points.push([xr, yr]);
       }
     }
   }
@@ -135,6 +166,7 @@ function createHexGeometry(R, spacing, tol = 1e-6) {
   const posArr = new Float32Array(points.length * 3);
   const colArr = new Float32Array(points.length * 3);
 
+  // Apply point positions and colors
   points.forEach((p, i) => {
     posArr[3*i]   = p[0];
     posArr[3*i+1] = p[1];
@@ -171,9 +203,16 @@ function applyTwistedTorus(geometry, r, nTwists = 1) {
 }
 
 function cartesianToToroidal(x, y) {
-  const alpha = Math.sqrt(3)*x - y;
-  const beta  = 2*y;
-  const t1 = (alpha * Math.PI + Math.PI) % (2 * Math.PI) - Math.PI;
-  const t2 = (beta  * Math.PI + Math.PI) % (2 * Math.PI) - Math.PI;
-  return [t1, t2];
+  // Direct translation from rg.spatial.grid.rhombus2torus
+  const r = Math.sqrt(3);
+  const alpha = x - y/r;
+  const beta = y / (r/2);
+
+  function wrap(angle) {
+    return ((angle + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+  }
+  const t1 = wrap(alpha * 2*Math.PI)
+  const t2 = wrap(beta  * 2*Math.PI);
+  const t3 = t2-t1;
+  return [t1, t2, t3];
 }
