@@ -3,6 +3,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import Delaunator from 'delaunator';
 
+// rendering mode: 'surface' or 'points'
+let renderMode = 'surface';
+let planePoints, torusPoints;
+
 // scene + camera + renderer
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xf0f0f0);
@@ -22,9 +26,10 @@ dirLight.position.set(5, 5, 5);
 scene.add(dirLight);
 
 // parameters
-const R = 0.5;            // half-distance between parallel hexagon sides
+const R = Math.tan(Math.PI/6);            // half-distance between parallel hexagon sides
+// const R = 0.7;
 const spacing = 0.01;   // lattice spacing
-const rCross = 0.5;    // tube radius for torus
+const rCross = 0.3;    // tube radius for torus
 
 // generate hexagonal mesh geometry
 const hexGeom = createHexGeometry(R, spacing);
@@ -35,6 +40,12 @@ hexGeom.computeVertexNormals();
 const planeMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
 const planeMesh = new THREE.Mesh(hexGeom, planeMat);
 scene.add(planeMesh);
+
+// point cloud for the flat hexagon
+const pointMat = new THREE.PointsMaterial({ size: spacing * 5, vertexColors: true });
+planePoints = new THREE.Points(hexGeom, pointMat);
+planePoints.visible = false;
+scene.add(planePoints);
 
 // torus mesh (wrapped)
 // regenerate fresh hex geometry for the torus (avoids clone issues)
@@ -47,18 +58,47 @@ const torusMesh = new THREE.Mesh(torusGeom, torusMat);
 torusMesh.visible = false;
 scene.add(torusMesh);
 
+// point cloud for the twisted torus
+torusPoints = new THREE.Points(torusGeom, pointMat.clone());
+torusPoints.visible = false;
+scene.add(torusPoints);
+
 // animation timeline (simple)
-function startAnimation() {
-  planeMesh.visible = true;
-  torusMesh.visible = false;
-  setTimeout(() => {
+function setVisible(plane, torus) {
+  if (renderMode === 'surface') {
+    planeMesh.visible = plane;
+    torusMesh.visible = torus;
+    planePoints.visible = false;
+    torusPoints.visible = false;
+  } else {
     planeMesh.visible = false;
-    torusMesh.visible = true;
-  }, 2000);
+    torusMesh.visible = false;
+    planePoints.visible = plane;
+    torusPoints.visible = torus;
+  }
+}
+
+function startAnimation() {
+  setVisible(true, false);
+  setTimeout(() => setVisible(false, true), 2000);
 }
 startAnimation();
 
 document.getElementById('resetBtn').onclick = startAnimation;
+
+// toggle between surface and point-cloud rendering
+const toggleBtn = document.createElement('button');
+toggleBtn.textContent = 'Point Cloud';
+toggleBtn.style.position = 'absolute';
+toggleBtn.style.top = '40px';
+toggleBtn.style.left = '10px';
+toggleBtn.style.zIndex = '1';
+document.body.appendChild(toggleBtn);
+toggleBtn.onclick = () => {
+  renderMode = renderMode === 'surface' ? 'points' : 'surface';
+  toggleBtn.textContent = renderMode === 'surface' ? 'Point Cloud' : 'Surface Mesh';
+  startAnimation();
+};
 
 // render loop
 function animate() {
@@ -100,8 +140,8 @@ function createHexGeometry(R, spacing, tol = 1e-6) {
     posArr[3*i+1] = p[1];
     posArr[3*i+2] = 0;
     // HSV color by t1 phase
-    const [t1,] = cartesianToToroidal(p[0], p[1]);
-    const hue = (t1 + Math.PI) / (2 * Math.PI);
+    const [t1,t2] = cartesianToToroidal(p[0], p[1]); // range [-pi, pi]
+    const hue = (t1 + Math.PI) / (2 * Math.PI); // range [0, 1]
     const col = new THREE.Color().setHSL(hue, 1, 0.5);
     colArr[3*i]   = col.r;
     colArr[3*i+1] = col.g;
