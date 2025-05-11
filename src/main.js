@@ -1,217 +1,184 @@
-// src/main.js
+// main.js
+// Three.js + GSAP animation of hex→cylinder→twist→torus
+
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import Delaunator from 'delaunator';
-import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { F01_morph, F12_morph, F23_morph, gridNodes, rotate2d, euclidean2torus, simulateGridCells, constrainedDelaunay } from './torusUtils.js';
+import {GUI} from 'dat.gui';
+import {gsap} from 'gsap';
 
-// rendering mode: 'surface' or 'points'
-let renderMode = 'surface';
-let planePoints, torusPoints, boundingLines;
+// ---- View settings ----
+const nGrid = 30;
+const maxPhaseMag = 1/Math.sqrt(3);
+const upVec = new THREE.Vector3(0,0,1);
+const cameraPos = new THREE.Vector3(0,10,0);
+const cameraTarget = new THREE.Vector3(0,0,0);
+const viewAngleStart = 75;
+const viewAngleZoomEnd = 50;
+const viewAngleTorusEnd = 25;
+const zoomSteps = 10;
+const morphSteps = 50;
+const stepDuration = 3; // seconds per stage
 
-// ---- scene setup ----
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xf0f0f0);
-
-const camera = new THREE.PerspectiveCamera(
-  45,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  100
-);
-camera.position.set(0, 0, 5);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// ---- Scene setup ----
+const container = document.getElementById('container');
+const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-document.getElementById('container').appendChild(renderer.domElement);
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(viewAngleStart, window.innerWidth/window.innerHeight, 0.1, 1000);
+camera.position.copy(cameraPos);
+camera.up.copy(upVec);
+camera.lookAt(cameraTarget);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-dirLight.position.set(5, 5, 5);
-scene.add(dirLight);
+// ---- Generate hex grid points ----
+let Pv = gridNodes(nGrid+1, 1);
+Pv = Pv.map(([x,y]) => [x/(nGrid+1)*maxPhaseMag, y/(nGrid+1)*maxPhaseMag]);
+Pv = rotate2d(Pv, Math.PI/6);
 
-// ---- parameters ----
-const R = Math.tan(Math.PI / 6);  // side-to-side width = 1
-const resolution = 100;
-const spacing = R / resolution;
-// const spacing = 0.01;             // hex grid resolution
-const rCross  = 0.3;              // tube radius for torus\ nconst rCross = 0.3;                // tube radius for torus
+// ---- Compute toroidal phases ----
+const phases = euclidean2torus(Pv); // [[t1,t2,t3], ...]
+const t1 = phases.map(p=>p[0]);
+const t2 = phases.map(p=>p[1]);
+const t3 = phases.map(p=>p[2]);
 
-// ---- flat hexagon ----
-const hexGeom = createHexGeometry(R, resolution);
-hexGeom.computeVertexNormals();
+// ---- Simulate grid-cell firing rates ----
+// in MATLAB: gridCellPhases & sigma
+const gridCellPhases = []; // TODO: extract from MATLAB script
+const gridCells = simulateGridCells(Pv, gridCellPhases, /*sigma*/0.2);
 
-const planeMat = new THREE.MeshBasicMaterial({
-  vertexColors: true,
-  side: THREE.DoubleSide
-});
-const planeMesh = new THREE.Mesh(hexGeom, planeMat);
-scene.add(planeMesh);
+// ---- Triangulate hex tile ----
+const triangles = constrainedDelaunay(Pv, /*spacing*/maxPhaseMag/(nGrid+1));
 
-// also as point cloud
-const pointMat = new THREE.PointsMaterial({ size: spacing * 5, vertexColors: true });
-planePoints = new THREE.Points(hexGeom, pointMat);
-planePoints.visible = false;
-scene.add(planePoints);
+// ---- BufferGeometry with morph targets ----
+const baseGeom = new THREE.BufferGeometry();
+const N = Pv.length;
 
-// ---- twisted torus surface ----
-// build the base hex geometry and apply the twist
-const rawTorusGeom = createHexGeometry(R, resolution);
-applyTwistedTorus(rawTorusGeom, rCross);
+// positions attribute (will be morphTarget0, so keep initial flat positions)
+const pos0 = new Float32Array(N*3);
+for (let i=0; i<N; i++) {
+  const [x,y] = Pv[i];
+  pos0[3*i] = x;
+  pos0[3*i+1] = y;
+  pos0[3*i+2] = 0;
+}
+baseGeom.setAttribute('position', new THREE.BufferAttribute(pos0, 3));
 
-// properly weld the seam by merging vertices into a new geometry
-const torusGeom = mergeVertices(rawTorusGeom, 0.001);
-torusGeom.computeVertexNormals();
-
-// surface mesh
-const torusMat = new THREE.MeshPhongMaterial({ vertexColors: true, side: THREE.DoubleSide });
-const torusMesh = new THREE.Mesh(torusGeom, torusMat);
-torusMesh.visible = false;
-scene.add(torusMesh);
-
-// point cloud version
-torusPoints = new THREE.Points(torusGeom, pointMat.clone());
-torusPoints.visible = false;
-scene.add(torusPoints);
-
-// ---- bounding box sanity lines ----
-const bbGeom = new THREE.BufferGeometry();
-const bbVerts = new Float32Array([
-  -0.5, -0.5, 0,  -0.5,  0.5, 0,
-   0.5, -0.5, 0,   0.5,  0.5, 0,
-  -0.5, -0.5, 0,   0.5, -0.5, 0,
-  -0.5,  0.5, 0,   0.5,  0.5, 0
-]);
-bbGeom.setAttribute('position', new THREE.BufferAttribute(bbVerts, 3));
-const bbMat = new THREE.LineBasicMaterial({ color: 0x000000 });
-boundingLines = new THREE.LineSegments(bbGeom, bbMat);
-boundingLines.visible = false;
-scene.add(boundingLines);
-
-// ---- visibility control & animation ----
-function setVisible(plane, torus) {
-  if (renderMode === 'surface') {
-    planeMesh.visible = plane;
-    torusMesh.visible = torus;
-    planePoints.visible = false;
-    torusPoints.visible = false;
-    boundingLines.visible = plane;
-  } else {
-    planeMesh.visible = false;
-    torusMesh.visible = false;
-    planePoints.visible = plane;
-    torusPoints.visible = torus;
-    boundingLines.visible = false;
+// add morph targets: F01, F12, F23
+function buildMorph(name, fn, pSteps, params) {
+  const attr = [];
+  for (let j=0; j<pSteps.length; j++) {
+    const p = pSteps[j];
+    const {x,y,z} = fn(t1, t2, p, ...params);
+    for (let i=0; i<N; i++) {
+      attr.push(x[i], y[i], z[i]);
+    }
   }
+  baseGeom.morphAttributes[name] = [ new THREE.Float32BufferAttribute(attr, 3) ];
 }
+// generate p arrays
+const p01 = Array.from({length:morphSteps}, (_,i)=>i/(morphSteps-1));
+const p12 = p01;
+const p23 = p01;
+buildMorph('F01', F01_morph, p01, [2*Math.PI]);
+buildMorph('F12', F12_morph, p12, [2*Math.PI]);
+buildMorph('F23', F23_morph, p23, [3, 1]);
 
-function startAnimation() {
-  setVisible(true, false);
-  setTimeout(() => setVisible(false, true), 2000);
-}
-startAnimation();
+baseGeom.setIndex(triangles);
+baseGeom.computeVertexNormals();
 
-document.getElementById('resetBtn').onclick = startAnimation;
+// color attribute placeholders
+const colorAttr = new THREE.Float32BufferAttribute(N*3, 3);
+baseGeom.setAttribute('color', colorAttr);
 
-// toggle button
-const toggleBtn = document.createElement('button');
-toggleBtn.textContent = 'Point Cloud';
-toggleBtn.style.cssText = 'position:absolute;top:40px;left:10px;z-index:1';
-document.body.appendChild(toggleBtn);
-toggleBtn.onclick = () => {
-  renderMode = renderMode === 'surface' ? 'points' : 'surface';
-  toggleBtn.textContent = renderMode === 'surface' ? 'Point Cloud' : 'Surface Mesh';
-  startAnimation();
+// ---- Mesh & wireframe ----
+const faceMat = new THREE.MeshPhongMaterial({ vertexColors:true, transparent:true, opacity:0.6, side: THREE.DoubleSide });
+const mesh = new THREE.Mesh(baseGeom, faceMat);
+faceMat.morphTargets = true;
+scene.add(mesh);
+
+const wireMat = new THREE.LineBasicMaterial({ vertexColors:true });
+const wire = new THREE.LineSegments(new THREE.WireframeGeometry(baseGeom), wireMat);
+scene.add(wire);
+
+// ---- dat.GUI controls ----
+const gui = new GUI();
+const params = {
+  wireframeMode: 'off', // off, single, data
+  faceMode: 'data',     // off, single, data
+  dataArray: 't1'       // t1, t2, t3, gridCells
 };
 
-// main render loop
+// wireframeMode dropdown
+gui.add(params, 'wireframeMode', ['off','single','data'])
+   .name('Wireframe')
+   .onChange(updateVisibility);
+// faceMode dropdown
+gui.add(params, 'faceMode', ['off','single','data'])
+   .name('Faces')
+   .onChange(updateVisibility);
+// dataArray
+gui.add(params, 'dataArray', ['t1','t2','t3','gridCells'])
+   .name('Data')
+   .onChange(value => { updateColors(); updateVisibility(); });
+
+function updateColors() {
+  const arr = { t1, t2, t3, gridCells }[params.dataArray];
+  for (let i=0;i<N;i++) {
+    const v = params.dataArray==='gridCells'? arr[i] : (arr[i]+Math.PI)/(2*Math.PI);
+    const color = new THREE.Color().setHSL(v,1,0.5);
+    colorAttr.setXYZ(i, color.r, color.g, color.b);
+  }
+  colorAttr.needsUpdate = true;
+}
+
+function updateVisibility() {
+  // wireframe
+  wire.visible = params.wireframeMode!=='off';
+  if (params.wireframeMode==='single') wireMat.color.set('#ffffff');
+  if (params.wireframeMode==='data') wireMat.vertexColors = true;
+  // faces
+  mesh.visible = params.faceMode!=='off';
+  faceMat.transparent = params.faceMode==='data';
+  if (params.faceMode==='single') faceMat.color.set('#888888');
+  if (params.faceMode==='data') faceMat.vertexColors = true;
+}
+
+updateColors(); updateVisibility();
+
+// ---- Lighting ----
+scene.add(new THREE.AmbientLight(0x404040));
+const dirLight = new THREE.DirectionalLight(0xffffff,1);
+dirLight.position.set(5,5,5);
+scene.add(dirLight);
+
+// ---- Animation timeline ----
+const timeline = gsap.timeline({ repeat:-1, yoyo:true });
+// reset morph influences
+mesh.morphTargetInfluences.fill(0);
+
+// initial: flat hex tiles (morph targets off)
+timeline.to(mesh.morphTargetInfluences, { 0: 0, 1:0, 2:0, duration:0 });
+// Zoom
+timeline.to(camera, { fov: viewAngleZoomEnd, duration: stepDuration, onUpdate: ()=>camera.updateProjectionMatrix() });
+// F01
+timeline.to(mesh.morphTargetInfluences, { 0: 1, duration: stepDuration });
+// F12
+timeline.to(mesh.morphTargetInfluences, { 1: 1, duration: stepDuration });
+// F23
+timeline.to(mesh.morphTargetInfluences, { 2: 1, duration: stepDuration });
+// Torus viewAngle
+timeline.to(camera, { fov: viewAngleTorusEnd, duration: stepDuration, onUpdate: ()=>camera.updateProjectionMatrix() });
+
+// ---- Render loop ----
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
   renderer.render(scene, camera);
 }
 animate();
-
-// --- Geometry helper functions ---
-
-function rot2d(x, y, a) {
-  return [
-    x * Math.cos(a) - y * Math.sin(a),
-    y * Math.cos(a) + x * Math.sin(a)
-  ];
-}
-
-function createHexGeometry(R, n, tol = 1e-6) {
-
-  const spacing = R/n;
-
-  const a = [spacing, 0];
-  const b = [spacing / 2, spacing * Math.sqrt(3) / 2];
-  // const n = Math.ceil(R / spacing);
-  const pts = [];
-  const rot = Math.PI / 6; // align hexagon
-
-  for (let i = -n; i <= n; i++) {
-    for (let j = -n; j <= n; j++) {
-      const x = i * a[0] + j * b[0];
-      const y = i * a[1] + j * b[1];
-      if (
-        Math.abs(x) <= R + tol &&
-        Math.abs(y) <= Math.sqrt(3) * R / 2 + tol &&
-        Math.abs(x) * Math.sqrt(3) + Math.abs(y) <= Math.sqrt(3) * R + tol
-      ) {
-        const [xr, yr] = rot2d(x, y, rot);
-        pts.push([xr, yr]);
-      }
-    }
-  }
-
-  const delaunay = Delaunator.from(pts);
-  const geom = new THREE.BufferGeometry();
-  const posArr = new Float32Array(pts.length * 3);
-  const colArr = new Float32Array(pts.length * 3);
-
-  pts.forEach((p, i) => {
-    posArr[3 * i] = p[0];
-    posArr[3 * i + 1] = p[1];
-    posArr[3 * i + 2] = 0;
-    const [t1] = cartesianToToroidal(p[0], p[1]);
-    const hue = (t1 + Math.PI) / (2 * Math.PI);
-    const c = new THREE.Color().setHSL(hue, 1, 0.5);
-    colArr[3 * i] = c.r;
-    colArr[3 * i + 1] = c.g;
-    colArr[3 * i + 2] = c.b;
-  });
-
-  geom.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
-  geom.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
-  geom.setIndex(new THREE.BufferAttribute(delaunay.triangles, 1));
-
-  return geom;
-}
-
-function applyTwistedTorus(geom, r, nTwists = 1) {
-  const pos = geom.getAttribute('position');
-  for (let i = 0; i < pos.count; i++) {
-    const x0 = pos.getX(i), y0 = pos.getY(i);
-    const [t1, t2] = cartesianToToroidal(x0, y0);
-    const t2r = t2 + nTwists * t1;
-    const X = Math.cos(t1) * (1 + r * Math.cos(t2r));
-    const Y = Math.sin(t1) * (1 + r * Math.cos(t2r));
-    const Z = r * Math.sin(t2r);
-    pos.setXYZ(i, X, Y, Z);
-  }
-  pos.needsUpdate = true;
-}
-
-function cartesianToToroidal(x, y) {
-  const r = Math.sqrt(3);
-  const alpha = x - y / r;
-  const beta = y / (r / 2);
-  const wrap = a => ((a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
-  const t1 = wrap(alpha * 2 * Math.PI);
-  const t2 = wrap(beta * 2 * Math.PI);
-  const t3 = wrap(t2 - t1);
-  return [t1, t2, t3];
-}

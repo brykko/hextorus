@@ -12,8 +12,10 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
+    "dat.gui": "^0.7.9",
     "delaunator": "^5.0.1",
     "delaunay-triangulate": "^1.1.6",
+    "gsap": "^3.13.0",
     "three": "^0.176.0"
   }
 }
