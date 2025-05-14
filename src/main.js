@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GUI } from 'dat.gui';
 import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus, hexPhaseTile,
          F01_morph, F12_morph, F23_morph, gridCellPdf } from './torusUtils.js';
 
@@ -27,7 +28,7 @@ const STAGE_DURATION = 3000; // ms per morph stage
 const LOOP_STAGES = ['fade', 'cylinder', 'twist', 'torus', 'twist', 'cylinder', 'fade'];
 const FPS = 60;
 const HEX_SIDE = 1 / Math.sqrt(3);
-const NGRID = 50;
+const NGRID = 20;
 const SCALE = 2 * Math.PI;
 const NTILE_RINGS = 2;
 const NTILE_I = 50;
@@ -44,7 +45,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(WIDTH, HEIGHT);
 document.body.appendChild(renderer.domElement);
 
-camera.position.set(0, 20, 0);
+camera.position.set(0, 30, 0);
 camera.up.set(0, 0, 1);
 camera.lookAt(0, 0, 0);
 
@@ -186,32 +187,22 @@ createMorphMesh();
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 scene.add(new THREE.DirectionalLight(0xffffff, 0.4));
 
-// --- UI Buttons -------------------------------------------------------
-function makeButton(label, onClick) {
-  const btn = document.createElement('button');
-  btn.textContent = label;
-  btn.onclick = onClick;
-  document.body.appendChild(btn);
-}
+// --- GUI controls ---
+const gui = new GUI();
+const controls = {
+  wireframe: wireframeMode,
+  faces: faceMode,
+  data: dataMode,
+  restart: () => { stageIndex = 0; stageStart = performance.now(); }
+};
+gui.add(controls, 'wireframe', ['off','plain','data'])
+  .name('Wireframe').onChange(v => { wireframeMode = v; updateMaterial(); });
+gui.add(controls, 'faces', ['off','plain','data'])
+  .name('Faces').onChange(v => { faceMode = v; updateMaterial(); });
+gui.add(controls, 'data', ['torus1','torus2','torus3','gridCells'])
+  .name('Data').onChange(v => { dataMode = v; updateColors(); });
+gui.add(controls, 'restart').name('Restart');
 
-// Wireframe controls
-makeButton('WF Off',    () => { wireframeMode='off'; updateMaterial(); });
-makeButton('WF Plain',  () => { wireframeMode='plain'; updateMaterial(); });
-makeButton('WF Data',   () => { wireframeMode='data'; updateMaterial(); });
-// Face controls
-makeButton('FC Off',    () => { faceMode='off'; updateMaterial(); });
-makeButton('FC Plain',  () => { faceMode='plain'; updateMaterial(); });
-makeButton('FC Data',   () => { faceMode='data'; updateMaterial(); });
-// Data controls
-['torus1','torus2','torus3','gridCells'].forEach(dm =>
-  makeButton(dm, () => { dataMode = dm; updateColors(); })
-);
-
-// Restart button
-makeButton('Restart', () => {
-  stageIndex = 0;
-  stageStart = performance.now();
-});
 
 function updateMaterial() {
   faceMesh.visible = (faceMode !== 'off');
@@ -280,7 +271,11 @@ function animate() {
   const t = Math.min(dt / STAGE_DURATION, 1);
 
   if (stage==='fade') {
-    // TODO: fade peripheral & zoom camera
+    // Fade stage: ensure mesh is at flat-sheet state
+    const Tp = Tv.map(([t1, t2]) => [t1, t2]);
+    const out = F01_morph(Tp, 0);  // p=0 gives flat sheet
+    applyMorph(out);
+    // (Optional) adjust camera FOV or other fade effects here
   } else if (stage==='cylinder') {
     const Tp = Tv.map(([t1,t2]) => [t1, t2]);
     const out = F01_morph(Tp, t);
