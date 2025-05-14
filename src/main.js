@@ -27,7 +27,7 @@ const STAGE_DURATION = 3000; // ms per morph stage
 const LOOP_STAGES = ['fade', 'cylinder', 'twist', 'torus', 'twist', 'cylinder', 'fade'];
 const FPS = 60;
 const HEX_SIDE = 1 / Math.sqrt(3);
-const NGRID = 25;
+const NGRID = 50;
 const SCALE = 2 * Math.PI;
 const NTILE_RINGS = 2;
 const NTILE_I = 50;
@@ -101,21 +101,28 @@ for (let s = 0; s < 6; s++) {
   TtileI.push(pts);
 }
 
-// 4) Simulated grid-cell PDFs at faces and vertices
-const gridPhases = [ [0,0.3], [0.9,0.35], [0.6,0.7] ]
-  .map(([a,b]) => [ a * HEX_SIDE, b * HEX_SIDE ]);
+// 4) Simulated grid-cell PDFs at vertices
+const gridPhases = [
+  [0, 0.3],
+  [0.9, 0.35],
+  [0.6, 0.7]
+].map(([a, b]) => [a * HEX_SIDE, b * HEX_SIDE]);
 
-const gridCellsRgbV = Pv.map((_, idx) => {
-  const col = [0,0,0];
-  gridPhases.forEach((ph, g) => {
-    const Z = gridCellPdf(
-      [Pv[idx][0]], [Pv[idx][1]], ph, 0.1
-    );
-    col[g] = Z[0][0];
+// Compute normalized PDF values per vertex for each grid cell
+const gridCellsRgbV = (() => {
+  // Compute and normalize PDF for each phase across all Pv points
+  const allNormPdfs = gridPhases.map(ph => {
+    const Z = gridCellPdf(Pv, ph, 0.1);
+    const maxZ = Math.max(...Z);
+    return Z.map(v => v / maxZ);
   });
-  return col;
-});
-// const gridCellsRgbF = ... // No longer used: face-based grid cell colors
+  // Build [r,g,b] per vertex
+  return Pv.map((_, i) => [
+    allNormPdfs[0][i],
+    allNormPdfs[1][i],
+    allNormPdfs[2][i]
+  ]);
+})();
 
 // --- Mesh & materials ------------------------------------------------
 let faceMesh, wireMesh;

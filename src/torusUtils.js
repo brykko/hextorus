@@ -144,34 +144,30 @@ return pEuclidean.map(([x, y]) => {
 // }
 
 /**
- * Generate firing-rate PDF for an artificial grid cell.
- * @param {number[][]} X      2D array of X coordinates (row-major).
- * @param {number[][]} Y      2D array of Y coordinates, same size as X.
- * @param {number[]}   phase  [phaseX, phaseY] offset.
- * @param {number}     sigma  Gaussian width.
- * @returns {number[][]}      Z, same size as X and Y.
+ * Generate firing-rate PDF for an artificial grid cell at a set of points.
+ * @param {Array<[number,number]>} points - Array of [x,y] coordinates.
+ * @param {number[]} phase              - [phaseX, phaseY] offset.
+ * @param {number}   sigma              - Gaussian width.
+ * @returns {number[]} Z                - Array of PDF values per point.
  */
-export function gridCellPdf(X, Y, phase, sigma) {
-  // Determine how many rings needed to cover all X,Y
-  const flatX = X.flat();
-  const flatY = Y.flat();
-  const maxAbs = Math.max(...flatX.map(Math.abs), ...flatY.map(Math.abs));
+export function gridCellPdf(points, phase, sigma) {
+  // Determine number of rings to cover all points
+  const maxAbs = Math.max(
+    ...points.map(p => Math.abs(p[0])),
+    ...points.map(p => Math.abs(p[1]))
+  );
   const nRings = Math.ceil(1.5 * maxAbs);
-
-  const nodes = gridNodes(nRings);  // [[x1,y1], [x2,y2], ...]
-  const rows = X.length, cols = X[0].length;
-  const Z = Array.from({ length: rows }, () => Array(cols).fill(0));
-
+  const nodes = gridNodes(nRings);
+  const Z = new Array(points.length).fill(0);
   const normFactor = 1 / (Math.sqrt(2 * Math.PI) * sigma);
 
   for (const [dx, dy] of nodes) {
     const phaseX = phase[0] + dx;
     const phaseY = phase[1] + dy;
-    for (let i = 0; i < rows; i++) {
-      for (let j = 0; j < cols; j++) {
-        const dd = Math.hypot(X[i][j] - phaseX, Y[i][j] - phaseY);
-        Z[i][j] += normFactor * Math.exp(-0.5 * (dd / sigma) ** 2);
-      }
+    for (let i = 0; i < points.length; i++) {
+      const [x, y] = points[i];
+      const dd = Math.hypot(x - phaseX, y - phaseY);
+      Z[i] += normFactor * Math.exp(-0.5 * (dd / sigma) ** 2);
     }
   }
 
