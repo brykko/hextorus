@@ -16,6 +16,7 @@
     "delaunator": "^5.0.1",
     "delaunay-triangulate": "^1.1.6",
     "gsap": "^3.13.0",
+    "postprocessing": "^6.37.3",
     "three": "^0.176.0"
   }
 }

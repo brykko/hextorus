@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { GUI } from 'dat.gui';
+import { EffectComposer, EffectPass, RenderPass, BloomEffect } from 'postprocessing';
+import { KernelSize } from 'postprocessing';
 import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus, hexPhaseTile,
          F01_morph, F12_morph, F23_morph, gridCellPdf } from './torusUtils.js';
 
@@ -44,6 +46,25 @@ const camera   = new THREE.PerspectiveCamera(75, WIDTH / HEIGHT, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(WIDTH, HEIGHT);
 document.body.appendChild(renderer.domElement);
+
+// --- Postprocessing setup ---
+// Clock for delta timing
+const clock = new THREE.Clock();
+
+// Composer and passes
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+// Bloom effect
+const bloomEffect = new BloomEffect({
+  intensity: 5,
+  kernelSize: KernelSize.LARGE,
+  luminanceThreshold: 0.0,
+  luminanceSmoothness: 0.025
+});
+const bloomPass = new EffectPass(camera, bloomEffect);
+bloomPass.renderToScreen = true;
+composer.addPass(bloomPass);
 
 camera.position.set(0, 30, 0);
 camera.up.set(0, 0, 1);
@@ -335,7 +356,8 @@ function animate() {
     stageStart = now;
   }
 
-  renderer.render(scene, camera);
+  const delta = clock.getDelta();
+  composer.render(delta);
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);
