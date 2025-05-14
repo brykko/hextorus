@@ -2,6 +2,24 @@ import * as THREE from 'three';
 import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus, hexPhaseTile,
          F01_morph, F12_morph, F23_morph, gridCellPdf } from './torusUtils.js';
 
+// Convert hue-saturation-value to RGB (all in [0,1])
+function hsv2rgb(h, s, v) {
+  const i = Math.floor(h * 6);
+  const f = h * 6 - i;
+  const p = v * (1 - s);
+  const q = v * (1 - f * s);
+  const t = v * (1 - (1 - f) * s);
+  const mod = i % 6;
+  switch (mod) {
+    case 0: return [v, t, p];
+    case 1: return [q, v, p];
+    case 2: return [p, v, t];
+    case 3: return [p, q, v];
+    case 4: return [t, p, v];
+    case 5: return [v, p, q];
+  }
+}
+
 // --- Configuration --------------------------------------------------
 const WIDTH = 800;
 const HEIGHT = 600;
@@ -181,13 +199,27 @@ function updateColors() {
   if (wireframeMode === 'data') {
     if (dataMode === 'gridCells') {
       colorsArray = gridCellsRgbV;
+    } else if (dataMode.startsWith('torus')) {
+      const channel = parseInt(dataMode.slice(-1), 10) - 1; // 0,1,2
+      const src = Tv;
+      colorsArray = src.map(phases => {
+        // wrap phase into [0,2pi], normalize to [0,1]
+        const h = ((((phases[channel] % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI)) / (2*Math.PI));
+        return hsv2rgb(h, 1, 1);
+      });
     }
-    // TODO: add torus1/2/3 as needed
   } else if (faceMode === 'data') {
     if (dataMode === 'gridCells') {
       colorsArray = gridCellsRgbF;
+    } else if (dataMode.startsWith('torus')) {
+      const channel = parseInt(dataMode.slice(-1), 10) - 1; // 0,1,2
+      const src = Tf;
+      colorsArray = src.map(phases => {
+        // wrap phase into [0,2pi], normalize to [0,1]
+        const h = ((((phases[channel] % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI)) / (2*Math.PI));
+        return hsv2rgb(h, 1, 1);
+      });
     }
-    // TODO: add torus1/2/3 as needed
   }
 
   if (colorsArray) {
