@@ -27,7 +27,7 @@ const STAGE_DURATION = 3000; // ms per morph stage
 const LOOP_STAGES = ['fade', 'cylinder', 'twist', 'torus', 'twist', 'cylinder', 'fade'];
 const FPS = 60;
 const HEX_SIDE = 1 / Math.sqrt(3);
-const NGRID = 50;
+const NGRID = 25;
 const SCALE = 2 * Math.PI;
 const NTILE_RINGS = 2;
 const NTILE_I = 50;
@@ -84,7 +84,7 @@ const Pfi = tri.map(([i,j,k]) => [
 
 // 2) Toroidal phases (unwrapped)
 const Tv = euclidean2torus(Pv);  // [[t1,t2,t3],...]
-const Tf = euclidean2torus(Pfi);
+// const Tf = euclidean2torus(Pfi); // No longer used: face-based torus phases
 
 // 3) Edge interpolation for hex tile boundary
 const tileVerts = hexPhaseTile();
@@ -115,33 +115,51 @@ const gridCellsRgbV = Pv.map((_, idx) => {
   });
   return col;
 });
-const gridCellsRgbF = Pfi.map((_, idx) => {
-  const col = [0,0,0];
-  gridPhases.forEach((ph, g) => {
-    const Z = gridCellPdf(
-      [Pfi[idx][0]], [Pfi[idx][1]], ph, 0.1
-    );
-    col[g] = Z[0][0];
-  });
-  return col;
-});
+// const gridCellsRgbF = ... // No longer used: face-based grid cell colors
 
 // --- Mesh & materials ------------------------------------------------
-let mesh;
+let faceMesh, wireMesh;
+
+// Precompute line indices for wireframe
+const faceIdx = GvGeom.index.array;
+const lineIndices = [];
+for (let i = 0; i < faceIdx.length; i += 3) {
+  const a = faceIdx[i], b = faceIdx[i+1], c = faceIdx[i+2];
+  lineIndices.push(a, b, b, c, c, a);
+}
+
 function createMorphMesh() {
   const geom = GvGeom.clone();
-  const mat = new THREE.MeshPhongMaterial({
+  // share position buffer
+  const posAttr = geom.getAttribute('position');
+
+  // Face mesh
+  const faceMat = new THREE.MeshPhongMaterial({
     side: THREE.DoubleSide,
     transparent: true,
     opacity: 1,
-    wireframe: (wireframeMode !== 'off'),
-    vertexColors: (wireframeMode==='data'),
+    vertexColors: (faceMode === 'data'),
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1
   });
-  mesh = new THREE.Mesh(geom, mat);
-  scene.add(mesh);
+  faceMesh = new THREE.Mesh(geom, faceMat);
+  scene.add(faceMesh);
+
+  // Wireframe mesh
+  const wireGeom = new THREE.BufferGeometry();
+  wireGeom.setAttribute('position', posAttr);
+  wireGeom.setIndex(lineIndices);
+  const wireMat = new THREE.LineBasicMaterial({
+    transparent: true,
+    opacity: 1,
+    vertexColors: (wireframeMode === 'data'),
+    color: 0xffffff,
+    depthTest: false
+  });
+  wireMesh = new THREE.LineSegments(wireGeom, wireMat);
+  wireMesh.renderOrder = 1;
+  scene.add(wireMesh);
 }
 createMorphMesh();
 // // DEBUG: show all raw gridNodes Pv points
@@ -182,44 +200,39 @@ makeButton('FC Data',   () => { faceMode='data'; updateMaterial(); });
   makeButton(dm, () => { dataMode = dm; updateColors(); })
 );
 
+// Restart button
+makeButton('Restart', () => {
+  stageIndex = 0;
+  stageStart = performance.now();
+});
+
 function updateMaterial() {
-  mesh.material.wireframe = (wireframeMode !== 'off');
-  // enable vertexColors if either wireframe or face data mode is active
-  mesh.material.vertexColors = (wireframeMode === 'data' || faceMode === 'data');
-  mesh.material.needsUpdate = true;
+  faceMesh.visible = (faceMode !== 'off');
+  wireMesh.visible = (wireframeMode !== 'off');
+  faceMesh.material.vertexColors = (faceMode === 'data');
+  wireMesh.material.vertexColors = (wireframeMode === 'data');
+  faceMesh.material.needsUpdate = true;
+  wireMesh.material.needsUpdate = true;
   updateColors();
 }
 
 function updateColors() {
-  const geom = mesh.geometry;
+  const geom = faceMesh.geometry;
   const N = geom.getAttribute('position').count;
 
-  let colorsArray = null;
-  // Determine which data array to use for coloring
-  if (wireframeMode === 'data') {
-    if (dataMode === 'gridCells') {
-      colorsArray = gridCellsRgbV;
-    } else if (dataMode.startsWith('torus')) {
-      const channel = parseInt(dataMode.slice(-1), 10) - 1; // 0,1,2
-      const src = Tv;
-      colorsArray = src.map(phases => {
-        // wrap phase into [0,2pi], normalize to [0,1]
-        const h = ((((phases[channel] % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI)) / (2*Math.PI));
-        return hsv2rgb(h, 1, 1);
-      });
-    }
-  } else if (faceMode === 'data') {
-    if (dataMode === 'gridCells') {
-      colorsArray = gridCellsRgbF;
-    } else if (dataMode.startsWith('torus')) {
-      const channel = parseInt(dataMode.slice(-1), 10) - 1; // 0,1,2
-      const src = Tf;
-      colorsArray = src.map(phases => {
-        // wrap phase into [0,2pi], normalize to [0,1]
-        const h = ((((phases[channel] % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI)) / (2*Math.PI));
-        return hsv2rgb(h, 1, 1);
-      });
-    }
+  // Determine vertex data array based on dataMode
+  let colorsArray;
+  if (dataMode === 'gridCells') {
+    colorsArray = gridCellsRgbV;
+  } else if (dataMode.startsWith('torus')) {
+    const channel = parseInt(dataMode.slice(-1), 10) - 1; // 0,1,2
+    colorsArray = Tv.map(phases => {
+      // wrap phase into [0,2pi], normalize to [0,1]
+      const h = ((((phases[channel] % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI)) / (2*Math.PI));
+      return hsv2rgb(h, 1, 1);
+    });
+  } else {
+    colorsArray = null;
   }
 
   if (colorsArray) {
@@ -230,17 +243,21 @@ function updateColors() {
       colorAttr[3 * i + 1] = c[1];
       colorAttr[3 * i + 2] = c[2];
     }
-    geom.setAttribute('color', new THREE.BufferAttribute(colorAttr, 3));
-    geom.attributes.color.needsUpdate = true;
+    faceMesh.geometry.setAttribute('color', new THREE.BufferAttribute(colorAttr, 3));
+    wireMesh.geometry.setAttribute('color', new THREE.BufferAttribute(colorAttr, 3));
+    faceMesh.geometry.attributes.color.needsUpdate = true;
+    wireMesh.geometry.attributes.color.needsUpdate = true;
     return;
   }
 
-  // No data mapping: use plain-color rules
-  mesh.material.vertexColors = false;
+  // No data mapping: disable vertex colors and use plain-color rules
+  faceMesh.material.vertexColors = false;
+  wireMesh.material.vertexColors = false;
   if (wireframeMode === 'plain') {
-    mesh.material.color.set(0xffffff);  // white edges
-  } else if (faceMode === 'plain') {
-    mesh.material.color.set(0x888888);  // gray faces
+    wireMesh.material.color.set(0xffffff);
+  }
+  if (faceMode === 'plain') {
+    faceMesh.material.color.set(0x888888);
   }
 }
 
@@ -281,10 +298,11 @@ requestAnimationFrame(animate);
 
 // Apply new morph output to mesh
 function applyMorph(out) {
-  const pos = mesh.geometry.getAttribute('position');
+  const pos = faceMesh.geometry.getAttribute('position');
   for (let i = 0; i < out.length; i++) {
     const [x, y, z] = out[i];
     pos.setXYZ(i, x * SCALE, y * SCALE, z * SCALE);
   }
   pos.needsUpdate = true;
+  // Because wireMesh shares the position buffer attribute, it is updated automatically.
 }
