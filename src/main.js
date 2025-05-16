@@ -207,14 +207,19 @@ tileCenters.forEach(([cx, cy]) => {
   // Scale the entire tile to match morph coordinates
   group.scale.set(SCALE, SCALE, SCALE);
   // Face clone
-  // Use the shared morph geometry (including updated colors)
-  const faceGeomClone = faceMesh.geometry;
+  // Clone the original flat-hex geometry so it doesn’t morph
+  const faceGeomClone = GvGeom.clone();
+  // Initial color attribute copied from faceMesh
+  const origColor = faceMesh.geometry.getAttribute('color');
+  if (origColor) {
+    faceGeomClone.setAttribute('color', origColor.clone());
+  }
+  // Clone material for independent fade
   const faceMatClone = faceMesh.material.clone();
   faceMatClone.transparent = true;
   faceMatClone.opacity = 1;
   const meshClone = new THREE.Mesh(faceGeomClone, faceMatClone);
-  // const debugMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: false });
-  // const meshClone = new THREE.Mesh(faceGeomClone, debugMat);
+  meshClone.material.vertexColors = true;
   meshClone.position.set(cx, -1, cy);
   group.add(meshClone);
 
@@ -311,6 +316,17 @@ function updateColors() {
     // apply to face geometry only
     geom.setAttribute('color', new THREE.BufferAttribute(colorAttr, 3));
     geom.attributes.color.needsUpdate = true;
+    // Also update peripheral tile colors
+    tileGroups.forEach(group => {
+      const meshClone = group.children.find(c => c.type === 'Mesh');
+      if (meshClone) {
+        meshClone.geometry.setAttribute(
+          'color',
+          new THREE.BufferAttribute(colorAttr.slice(), 3)
+        );
+        meshClone.geometry.attributes.color.needsUpdate = true;
+      }
+    });
     return;
   }
 
