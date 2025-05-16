@@ -37,8 +37,6 @@ const NTILE_RINGS = 2;
 const NTILE_I = 50;
 
 // Rendering & data modes (manipulated via buttons)
-let wireframeMode = 'plain';    // 'off' | 'plain' | 'data'
-let faceMode      = 'plain';    // 'off' | 'plain' | 'data'
 let dataMode      = 'torus1';   // 'torus1' | 'torus2' | 'torus3' | 'gridCells'
 
 // --- Three.js setup --------------------------------------------------
@@ -176,7 +174,7 @@ function createMorphMesh() {
     depthWrite: false,       // allow back faces to blend through
     opacity: 0.5,
     blending: THREE.NormalBlending,
-    vertexColors: (faceMode === 'data'),
+    vertexColors: true,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1
@@ -192,7 +190,7 @@ function createMorphMesh() {
     transparent: true,
     depthWrite: true, 
     opacity: 0.1,
-    vertexColors: (wireframeMode === 'data'),
+    vertexColors: false,
     color: 0xffffff,
     depthTest: false
   });
@@ -208,15 +206,9 @@ scene.add(new THREE.AmbientLight(0xffffff, 3));
 // --- GUI controls ---
 const gui = new GUI();
 const controls = {
-  wireframe: wireframeMode,
-  faces: faceMode,
   data: dataMode,
   restart: () => { stageIndex = 0; stageStart = performance.now(); }
 };
-gui.add(controls, 'wireframe', ['off','plain','data'])
-  .name('Wireframe').onChange(v => { wireframeMode = v; updateMaterial(); });
-gui.add(controls, 'faces', ['off','plain','data'])
-  .name('Faces').onChange(v => { faceMode = v; updateMaterial(); });
 gui.add(controls, 'data', ['torus1','torus2','torus3','gridCells'])
   .name('Data').onChange(v => { dataMode = v; updateColors(); });
 
@@ -231,27 +223,18 @@ document.querySelectorAll('button').forEach(btn => {
 });
 
 function updateMaterial() {
-  // Show or hide each mesh
-  faceMesh.visible = (faceMode !== 'off');
-  wireMesh.visible = (wireframeMode !== 'off');
+  // Always show both meshes
+  faceMesh.visible = true;
+  wireMesh.visible = true;
 
-  // Switch between vertexColors and flat color
-  faceMesh.material.vertexColors = (faceMode === 'data');
-  wireMesh.material.vertexColors = (wireframeMode === 'data');
-
-  // When faces are visible, make the wireframe semi-transparent
-  if (faceMesh.visible) {
-    wireMesh.material.transparent = true;
-    // wireMesh.material.opacity     = 0.5;  // you can adjust this value
-  } else {
-    wireMesh.material.opacity     = 1.0;
-    // (optional) wireMesh.material.transparent = false;
-  }
+  // Face always data, wireframe always plain
+  faceMesh.material.vertexColors = true;
+  wireMesh.material.vertexColors = false;
+  wireMesh.material.color.set(0xffffff);
 
   faceMesh.material.needsUpdate = true;
   wireMesh.material.needsUpdate = true;
 
-  // Re-apply color buffer or flat colors
   updateColors();
 }
 
@@ -286,24 +269,15 @@ function updateColors() {
       colorAttr[3*i + 1] = c[1];
       colorAttr[3*i + 2] = c[2];
     }
-    // apply to both face and wire geometries
-    faceMesh.geometry.setAttribute('color', new THREE.BufferAttribute(colorAttr, 3));
-    wireMesh.geometry.setAttribute('color', new THREE.BufferAttribute(colorAttr, 3));
-    faceMesh.geometry.attributes.color.needsUpdate = true;
-    wireMesh.geometry.attributes.color.needsUpdate = true;
+    // apply to face geometry only
+    geom.setAttribute('color', new THREE.BufferAttribute(colorAttr, 3));
+    geom.attributes.color.needsUpdate = true;
     return;
   }
 
   // No data mode → revert to plain coloring
   faceMesh.material.vertexColors = false;
-  wireMesh.material.vertexColors = false;
-
-  if (wireframeMode === 'plain') {
-    wireMesh.material.color.set(0xffffff); // white wire
-  }
-  if (faceMode === 'plain') {
-    faceMesh.material.color.set(0x888888); // gray faces
-  }
+  faceMesh.material.color.set(0x888888); // gray faces
 }
 
 // --- Animation loop --------------------------------------------------
