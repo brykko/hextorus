@@ -4,6 +4,7 @@ import { EffectComposer, EffectPass, RenderPass, BloomEffect } from 'postprocess
 import { KernelSize } from 'postprocessing';
 import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus, hexPhaseTile,
          F01_morph, F12_morph, F23_morph, gridCellPdf } from './torusUtils.js';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 // Convert hue-saturation-value to RGB (all in [0,1])
 function hsv2rgb(h, s, v) {
@@ -27,10 +28,10 @@ function hsv2rgb(h, s, v) {
 const WIDTH = 800;
 const HEIGHT = 600;
 const STAGE_DURATION = 3000; // ms per morph stage
-const LOOP_STAGES = ['fade', 'cylinder', 'twist', 'torus', 'twist', 'cylinder', 'fade'];
+const STAGES = ['fade', 'cylinder', 'twist', 'torus'];
 const FPS = 60;
 const HEX_SIDE = 1 / Math.sqrt(3);
-const NGRID = 30;
+const NGRID = 15;
 const SCALE = 2 * Math.PI;
 const NTILE_RINGS = 2;
 const NTILE_I = 50;
@@ -44,6 +45,7 @@ let dataMode      = 'torus1';   // 'torus1' | 'torus2' | 'torus3' | 'gridCells'
 const scene    = new THREE.Scene();
 const camera   = new THREE.PerspectiveCamera(75, WIDTH / HEIGHT, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
+
 renderer.setSize(WIDTH, HEIGHT);
 document.body.appendChild(renderer.domElement);
 
@@ -57,9 +59,9 @@ composer.addPass(new RenderPass(scene, camera));
 
 // Bloom effect
 const bloomEffect = new BloomEffect({
-  intensity: 5,
+  intensity: 0,
   kernelSize: KernelSize.LARGE,
-  luminanceThreshold: 0.0,
+  luminanceThreshold: 0.5,
   luminanceSmoothness: 0.025
 });
 const bloomPass = new EffectPass(camera, bloomEffect);
@@ -69,6 +71,11 @@ composer.addPass(bloomPass);
 camera.position.set(0, 30, 0);
 camera.up.set(0, 0, 1);
 camera.lookAt(0, 0, 0);
+
+// --- Orbit controls ---
+const orbitControls = new OrbitControls(camera, renderer.domElement);
+orbitControls.enableDamping = true;
+orbitControls.dampingFactor = 0.1;
 
 // --- Prepare geometry data -------------------------------------------
 // 1) Flat hexagon grid
@@ -163,16 +170,33 @@ function createMorphMesh() {
   const posAttr = geom.getAttribute('position');
 
   // Face mesh
-  const faceMat = new THREE.MeshPhongMaterial({
-    side: THREE.DoubleSide,
-    transparent: true,
-    depthWrite: true,       // allow back faces to blend through
-    opacity: 1.0,
-    vertexColors: (faceMode === 'data'),
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1
-  });
+
+// … in createMorphMesh(), instead of MeshPhongMaterial:
+const faceMat = new THREE.MeshPhysicalMaterial({
+  side: THREE.DoubleSide,
+  blending: THREE.AdditiveBlending,
+  transparent: true,         // enable blending
+  depthWrite: false,
+  transmission: 0,         // 1 = fully “see-through” glass/plastic
+  thickness: 10,          // the sheet will be rendered with this thickness/depth
+  attenuationColor: new THREE.Color(0.9, 0.9, 0.9), 
+  attenuationDistance: 0.01,  // how quickly light is absorbed (smaller = more opaque)
+  roughness: 0.5,            // how glossy the surface is
+  metalness: 0.2,            // plastic, not metal
+  vertexColors: (faceMode === 'data')
+});
+
+  // const faceMat = new THREE.MeshPhongMaterial({
+  //   side: THREE.DoubleSide,
+  //   transparent: true,
+  //   depthWrite: false,       // allow back faces to blend through
+  //   opacity: 1.0,
+  //   blending: THREE.AdditiveBlending,
+  //   vertexColors: (faceMode === 'data'),
+  //   polygonOffset: true,
+  //   polygonOffsetFactor: 1,
+  //   polygonOffsetUnits: 1
+  // });
   faceMesh = new THREE.Mesh(geom, faceMat);
   scene.add(faceMesh);
 
@@ -181,9 +205,9 @@ function createMorphMesh() {
   wireGeom.setAttribute('position', posAttr);
   wireGeom.setIndex(lineIndices);
   const wireMat = new THREE.LineBasicMaterial({
-    transparent: false,
+    transparent: true,
     depthWrite: true, 
-    opacity: 1,
+    opacity: 0.1,
     vertexColors: (wireframeMode === 'data'),
     color: 0xffffff,
     depthTest: false
@@ -207,8 +231,13 @@ createMorphMesh();
 // scene.add(debugPoints);
 
 // Lights
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-scene.add(new THREE.DirectionalLight(0xffffff, 0.4));
+scene.add(new THREE.AmbientLight(0xffffff, 0));
+// const light = new THREE.PointLight(0xffffff, 3);
+// light.position.set(0, 10, 0);
+// scene.add(light);
+const dir = new THREE.DirectionalLight(0xffffff, 3);
+dir.position.set(0, 1, 1); // N.B. this is the light's *direction* vector not actual position!
+scene.add(dir);
 
 // --- GUI controls ---
 const gui = new GUI();
@@ -258,7 +287,7 @@ function updateMaterial() {
   // When faces are visible, make the wireframe semi-transparent
   if (faceMesh.visible) {
     wireMesh.material.transparent = true;
-    wireMesh.material.opacity     = 0.5;  // you can adjust this value
+    // wireMesh.material.opacity     = 0.5;  // you can adjust this value
   } else {
     wireMesh.material.opacity     = 1.0;
     // (optional) wireMesh.material.transparent = false;
@@ -330,8 +359,11 @@ let reverse = false;
 function animate() {
   const now = performance.now();
   const dt  = now - stageStart;
-  const stage = LOOP_STAGES[stageIndex];
-  const t = Math.min(dt / STAGE_DURATION, 1);
+  const stage = STAGES[stageIndex];
+  // const t = Math.min(dt / STAGE_DURATION, 1);
+  const rawT = Math.min(dt / STAGE_DURATION, 1);
+  // Reverse the morph fraction within each stage if reversing
+  const t = reverse ? 1 - rawT : rawT;
 
   if (stage==='fade') {
     // Fade stage: ensure mesh is at flat-sheet state
@@ -352,9 +384,24 @@ function animate() {
   }
 
   if (dt >= STAGE_DURATION) {
-    stageIndex = (stageIndex + 1) % LOOP_STAGES.length;
+    // advance or reverse through stages
+    if (reverse) {
+      stageIndex--;
+      if (stageIndex <= 0) {
+        stageIndex = 0;
+        reverse = false;
+      }
+    } else {
+      stageIndex++;
+      if (stageIndex > STAGES.length - 1) {
+        stageIndex = STAGES.length - 1;
+        reverse = true;
+      }
+    }
     stageStart = now;
   }
+
+  orbitControls.update();
 
   const delta = clock.getDelta();
   composer.render(delta);
@@ -364,11 +411,13 @@ requestAnimationFrame(animate);
 
 // Apply new morph output to mesh
 function applyMorph(out) {
+  // (the faceMesh and wireframe objects hold references to the same 'geometry' object)
   const pos = faceMesh.geometry.getAttribute('position');
   for (let i = 0; i < out.length; i++) {
     const [x, y, z] = out[i];
     pos.setXYZ(i, x * SCALE, y * SCALE, z * SCALE);
   }
   pos.needsUpdate = true;
+  faceMesh.geometry.computeVertexNormals();
   // Because wireMesh shares the position buffer attribute, it is updated automatically.
 }
