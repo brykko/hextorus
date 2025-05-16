@@ -76,6 +76,7 @@ camera.lookAt(0, 0, 0);
 const orbitControls = new OrbitControls(camera, renderer.domElement);
 orbitControls.enableDamping = true;
 orbitControls.dampingFactor = 0.1;
+// orbitControls.autoRotate = true;
 
 // --- Prepare geometry data -------------------------------------------
 // 1) Flat hexagon grid
@@ -169,34 +170,17 @@ function createMorphMesh() {
   // share position buffer
   const posAttr = geom.getAttribute('position');
 
-  // Face mesh
-
-// … in createMorphMesh(), instead of MeshPhongMaterial:
-const faceMat = new THREE.MeshPhysicalMaterial({
-  side: THREE.DoubleSide,
-  blending: THREE.AdditiveBlending,
-  transparent: true,         // enable blending
-  depthWrite: false,
-  transmission: 0,         // 1 = fully “see-through” glass/plastic
-  thickness: 10,          // the sheet will be rendered with this thickness/depth
-  attenuationColor: new THREE.Color(0.9, 0.9, 0.9), 
-  attenuationDistance: 0.01,  // how quickly light is absorbed (smaller = more opaque)
-  roughness: 0.5,            // how glossy the surface is
-  metalness: 0.2,            // plastic, not metal
-  vertexColors: (faceMode === 'data')
-});
-
-  // const faceMat = new THREE.MeshPhongMaterial({
-  //   side: THREE.DoubleSide,
-  //   transparent: true,
-  //   depthWrite: false,       // allow back faces to blend through
-  //   opacity: 1.0,
-  //   blending: THREE.AdditiveBlending,
-  //   vertexColors: (faceMode === 'data'),
-  //   polygonOffset: true,
-  //   polygonOffsetFactor: 1,
-  //   polygonOffsetUnits: 1
-  // });
+  const faceMat = new THREE.MeshPhongMaterial({
+    side: THREE.DoubleSide,
+    transparent: true,
+    depthWrite: false,       // allow back faces to blend through
+    opacity: 0.5,
+    blending: THREE.NormalBlending,
+    vertexColors: (faceMode === 'data'),
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1
+  });
   faceMesh = new THREE.Mesh(geom, faceMat);
   scene.add(faceMesh);
 
@@ -217,27 +201,9 @@ const faceMat = new THREE.MeshPhysicalMaterial({
   scene.add(wireMesh);
 }
 createMorphMesh();
-// // DEBUG: show all raw gridNodes Pv points
-// const debugPointsMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.05 });
-// const debugGeom = new THREE.BufferGeometry();
-// const rawPositions = new Float32Array(Pv.length * 3);
-// Pv.forEach(([x, y], i) => {
-//   rawPositions[3*i]   = x;
-//   rawPositions[3*i+1] = 0;
-//   rawPositions[3*i+2] = y;
-// });
-// debugGeom.setAttribute('position', new THREE.BufferAttribute(rawPositions, 3));
-// const debugPoints = new THREE.Points(debugGeom, debugPointsMaterial);
-// scene.add(debugPoints);
 
 // Lights
-scene.add(new THREE.AmbientLight(0xffffff, 0));
-// const light = new THREE.PointLight(0xffffff, 3);
-// light.position.set(0, 10, 0);
-// scene.add(light);
-const dir = new THREE.DirectionalLight(0xffffff, 3);
-dir.position.set(0, 1, 1); // N.B. this is the light's *direction* vector not actual position!
-scene.add(dir);
+scene.add(new THREE.AmbientLight(0xffffff, 3));
 
 // --- GUI controls ---
 const gui = new GUI();
@@ -263,17 +229,6 @@ document.querySelectorAll('button').forEach(btn => {
     btn.addEventListener('click', controls.restart);
   }
 });
-
-
-// function updateMaterial() {
-//   faceMesh.visible = (faceMode !== 'off');
-//   wireMesh.visible = (wireframeMode !== 'off');
-//   faceMesh.material.vertexColors = (faceMode === 'data');
-//   wireMesh.material.vertexColors = (wireframeMode === 'data');
-//   faceMesh.material.needsUpdate = true;
-//   wireMesh.material.needsUpdate = true;
-//   updateColors();
-// }
 
 function updateMaterial() {
   // Show or hide each mesh
