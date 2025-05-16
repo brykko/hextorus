@@ -33,7 +33,7 @@ const FPS = 60;
 const HEX_SIDE = 1 / Math.sqrt(3);
 const NGRID = 15;
 const SCALE = 2 * Math.PI;
-const NTILE_RINGS = 2;
+const NTILE_RINGS = 3;
 const NTILE_I = 50;
 
 // Rendering & data modes (manipulated via buttons)
@@ -41,7 +41,7 @@ let dataMode      = 'torus1';   // 'torus1' | 'torus2' | 'torus3' | 'gridCells'
 
 // --- Three.js setup --------------------------------------------------
 const scene    = new THREE.Scene();
-const camera   = new THREE.PerspectiveCamera(75, WIDTH / HEIGHT, 0.1, 1000);
+const camera   = new THREE.PerspectiveCamera(50, WIDTH / HEIGHT, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 
 renderer.setSize(WIDTH, HEIGHT);
@@ -104,30 +104,24 @@ function buildBufferGeometry(vertices2D, faces) {
 
 // Build vertex positions and face centroids
 const GvGeom = buildBufferGeometry(Pv, tri);
-// Face centroids for face-color data
-const Pfi = tri.map(([i,j,k]) => [
-  (Pv[i-1][0] + Pv[j-1][0] + Pv[k-1][0]) / 3,
-  (Pv[i-1][1] + Pv[j-1][1] + Pv[k-1][1]) / 3
-]);
 
 // 2) Toroidal phases (unwrapped)
 const Tv = euclidean2torus(Pv);  // [[t1,t2,t3],...]
-// const Tf = euclidean2torus(Pfi); // No longer used: face-based torus phases
 
-// 3) Edge interpolation for hex tile boundary
-const tileVerts = hexPhaseTile();
-tileVerts.push(tileVerts[0]);
-const TtileI = [];
-for (let s = 0; s < 6; s++) {
-  const p0 = tileVerts[s], p1 = tileVerts[s+1];
-  const pts = [];
-  for (let ii = 0; ii < NTILE_I; ii++) {
-    const t = ii / (NTILE_I - 1);
-    pts.push([ p0[0] * (1 - t) + p1[0] * t,
-               p0[1] * (1 - t) + p1[1] * t ]);
-  }
-  TtileI.push(pts);
-}
+// // 3) Edge interpolation for hex tile boundary
+// const tileVerts = hexPhaseTile();
+// tileVerts.push(tileVerts[0]);
+// const TtileI = [];
+// for (let s = 0; s < 6; s++) {
+//   const p0 = tileVerts[s], p1 = tileVerts[s+1];
+//   const pts = [];
+//   for (let ii = 0; ii < NTILE_I; ii++) {
+//     const t = ii / (NTILE_I - 1);
+//     pts.push([ p0[0] * (1 - t) + p1[0] * t,
+//                p0[1] * (1 - t) + p1[1] * t ]);
+//   }
+//   TtileI.push(pts);
+// }
 
 // 4) Simulated grid-cell PDFs at vertices
 const gridPhases = [
@@ -199,6 +193,50 @@ function createMorphMesh() {
   scene.add(wireMesh);
 }
 createMorphMesh();
+
+// --- Prepare tile clones for fade stage ---
+const tileGroups = [];
+const tileCenters = gridNodes(NTILE_RINGS);
+
+// Precompute boundary hexagon vertices (closed loop)
+const boundaryHex = hexPhaseTile();
+boundaryHex.push(boundaryHex[0]);
+tileCenters.forEach(([cx, cy]) => {
+
+  const group = new THREE.Group();
+  // Scale the entire tile to match morph coordinates
+  group.scale.set(SCALE, SCALE, SCALE);
+  // Face clone
+  const faceGeomClone = GvGeom.clone();
+  const faceMatClone = faceMesh.material.clone();
+  faceMatClone.transparent = true;
+  faceMatClone.opacity = 1;
+  // const meshClone = new THREE.Mesh(faceGeomClone, faceMatClone);
+  const debugMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: false });
+  const meshClone = new THREE.Mesh(faceGeomClone, debugMat);
+  meshClone.position.set(cx, -1, cy);
+  group.add(meshClone);
+
+  // Bold boundary lines
+  const bVerts = [];
+  boundaryHex.forEach(([x, y]) => {
+    bVerts.push(x, -1, y);
+  });
+  const bGeom = new THREE.BufferGeometry();
+  bGeom.setAttribute('position', new THREE.Float32BufferAttribute(bVerts, 3));
+  const bMat = new THREE.LineBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 1,
+    linewidth: 2
+  });
+  const bLine = new THREE.Line(bGeom, bMat);
+  bLine.position.set(cx, 0, cy);
+  group.add(bLine);
+
+  scene.add(group);
+  tileGroups.push(group);
+});
 
 // Lights
 scene.add(new THREE.AmbientLight(0xffffff, 3));
@@ -289,27 +327,45 @@ function animate() {
   const now = performance.now();
   const dt  = now - stageStart;
   const stage = STAGES[stageIndex];
-  // const t = Math.min(dt / STAGE_DURATION, 1);
   const rawT = Math.min(dt / STAGE_DURATION, 1);
   // Reverse the morph fraction within each stage if reversing
   const t = reverse ? 1 - rawT : rawT;
 
-  if (stage==='fade') {
-    // Fade stage: ensure mesh is at flat-sheet state
-    const Tp = Tv.map(([t1, t2]) => [t1, t2]);
-    const out = F01_morph(Tp, 0);  // p=0 gives flat sheet
-    applyMorph(out);
-    // (Optional) adjust camera FOV or other fade effects here
-  } else if (stage==='cylinder') {
-    const Tp = Tv.map(([t1,t2]) => [t1, t2]);
-    const out = F01_morph(Tp, t);
-    applyMorph(out);
-  } else if (stage==='twist') {
-    const out = F12_morph(Tv.map(([t1,t2])=>[t1,t2]), t);
-    applyMorph(out);
-  } else if (stage==='torus') {
-    const out = F23_morph(Tv.map(([t1,t2])=>[t1,t2]), t);
-    applyMorph(out);
+  if (stage === 'fade') {
+    // Hide morph meshes
+    faceMesh.visible = false;
+    wireMesh.visible = false;
+    // Show and fade tile clones
+    const fadeVal = reverse ? rawT : 1 - rawT;
+    tileGroups.forEach((group, idx) => {
+      // The first tile returned by gridNodes is the center
+      const isCenter = (idx === 0);
+      group.visible = true;
+      group.children.forEach(child => {
+        child.material.opacity = isCenter ? 1 : fadeVal;
+      });
+    });
+    // Zoom camera from wide to tight
+    camera.fov = THREE.MathUtils.lerp(40, 20, rawT);
+    camera.updateProjectionMatrix();
+  } else {
+    // Hide tile clones
+    tileGroups.forEach(group => group.visible = false);
+    // Show morph meshes
+    faceMesh.visible = true;
+    wireMesh.visible = true;
+    // Existing morph logic...
+    if (stage === 'cylinder') {
+      const Tp = Tv.map(([t1, t2]) => [t1, t2]);
+      const out = F01_morph(Tp, t);
+      applyMorph(out);
+    } else if (stage === 'twist') {
+      const out = F12_morph(Tv.map(([t1,t2])=>[t1,t2]), t);
+      applyMorph(out);
+    } else if (stage === 'torus') {
+      const out = F23_morph(Tv.map(([t1,t2])=>[t1,t2]), t);
+      applyMorph(out);
+    }
   }
 
   if (dt >= STAGE_DURATION) {
@@ -344,7 +400,7 @@ function applyMorph(out) {
   const pos = faceMesh.geometry.getAttribute('position');
   for (let i = 0; i < out.length; i++) {
     const [x, y, z] = out[i];
-    pos.setXYZ(i, x * SCALE, y * SCALE, z * SCALE);
+    pos.setXYZ(i, x, y, z);
   }
   pos.needsUpdate = true;
   faceMesh.geometry.computeVertexNormals();
