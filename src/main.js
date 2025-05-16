@@ -207,13 +207,14 @@ tileCenters.forEach(([cx, cy]) => {
   // Scale the entire tile to match morph coordinates
   group.scale.set(SCALE, SCALE, SCALE);
   // Face clone
-  const faceGeomClone = GvGeom.clone();
+  // Use the shared morph geometry (including updated colors)
+  const faceGeomClone = faceMesh.geometry;
   const faceMatClone = faceMesh.material.clone();
   faceMatClone.transparent = true;
   faceMatClone.opacity = 1;
-  // const meshClone = new THREE.Mesh(faceGeomClone, faceMatClone);
-  const debugMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: false });
-  const meshClone = new THREE.Mesh(faceGeomClone, debugMat);
+  const meshClone = new THREE.Mesh(faceGeomClone, faceMatClone);
+  // const debugMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: false });
+  // const meshClone = new THREE.Mesh(faceGeomClone, debugMat);
   meshClone.position.set(cx, -1, cy);
   group.add(meshClone);
 
