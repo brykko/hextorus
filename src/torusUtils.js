@@ -264,8 +264,9 @@ export function F01_morph(tp, p, H = 2 * Math.PI) {
       const v    = (t2 / twoPi) * H * (sqrt3 / 2);
   
       if (p <= 0) {
-        // flat sheet in X–Z plane at y=0
-        return [nphi, 0, v];
+        // flat sheet in X–Z plane at y=-1
+        // (The choice of -1 is because we want the cylinder to be centered on zero)
+        return [nphi, -1, v]; 
       } else {
         // isometric pipe-bend
         const R0    = 1 / p;
