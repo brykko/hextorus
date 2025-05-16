@@ -166,8 +166,8 @@ function createMorphMesh() {
     side: THREE.DoubleSide,
     transparent: true,
     depthWrite: false,       // allow back faces to blend through
-    opacity: 0.5,
-    blending: THREE.NormalBlending,
+    opacity: 1.0,
+    blending: THREE.AdditiveBlending,
     vertexColors: true,
     polygonOffset: true,
     polygonOffsetFactor: 1,
@@ -362,8 +362,12 @@ function animate() {
         child.material.opacity = isCenter ? 1 : fadeVal;
       });
     });
-    // Zoom camera from wide to tight
-    camera.fov = THREE.MathUtils.lerp(40, 20, rawT);
+    // Zoom camera: forward (wide→tight), reverse (tight→wide)
+    if (!reverse) {
+      camera.fov = THREE.MathUtils.lerp(40, 20, rawT);
+    } else {
+      camera.fov = THREE.MathUtils.lerp(20, 40, rawT);
+    }
     camera.updateProjectionMatrix();
   } else {
     // Hide tile clones
@@ -389,7 +393,7 @@ function animate() {
     // advance or reverse through stages
     if (reverse) {
       stageIndex--;
-      if (stageIndex <= 0) {
+      if (stageIndex < 0) {
         stageIndex = 0;
         reverse = false;
       }
