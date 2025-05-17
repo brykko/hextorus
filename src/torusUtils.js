@@ -169,123 +169,109 @@ export function constrainedDelaunay(P, sideLengthLimit, tol = 1e-6) {
 
 
 /**
- * Developable morph from flat sheet into cylinder.
- * @param {Array<[number,number]>} tp  Array of [t1, t2] pairs.
- * @param {number} p                  Morph parameter in [0,1].
- * @param {number} [H=2*Math.PI]      Cylinder height.
- * @returns {Array<[number,number,number]>}  Array of [x, y, z] for each input.
+ * Developable morph from flat sheet into cylinder for one point.
+ * @param {[number,number]} tp     [t1, t2] toroidal coordinates.
+ * @param {number}          p      Morph parameter in [0,1].
+ * @param {number}          [H=2π] Cylinder height.
+ * @returns {[number,number,number]} [x, y, z] Euclidean coordinates.
  */
-export function F01_morph(tp, p, H = 2 * Math.PI) {
-    const twoPi = 2 * Math.PI;
-    const sqrt3 = Math.sqrt(3);
-    return tp.map(([t1, t2]) => {
-      // lattice-driven angles
-      const nphi = t1 + t2 / 2;
-      const v    = (t2 / twoPi) * H * (sqrt3 / 2);
-  
-      if (p <= 0) {
-        // flat sheet in X–Z plane at y=-1
-        // (The choice of -1 is because we want the cylinder to be centered on zero)
-        return [nphi, -1, v]; 
-      } else {
-        // isometric pipe-bend
-        const R0    = 1 / p;
-        const theta = p * nphi;
-        const x     = R0 * Math.sin(theta);
-        const y     = R0 * (1 - Math.cos(theta)) - 1;  // center y=0 at p=1
-        return [x, y, v];
-      }
-    });
+export function F01_morph([t1, t2], p, H = 2 * Math.PI) {
+  const twoPi = 2 * Math.PI;
+  const sqrt3 = Math.sqrt(3);
+  // lattice-driven angles
+  const nphi = t1 + t2 / 2;
+  const v    = (t2 / twoPi) * H * (sqrt3 / 2);
+
+  if (p <= 0) {
+    // flat sheet in X–Z plane at y = -1 (centered at y=0 when p→1)
+    return [nphi, -1, v];
+  } else {
+    // isometric pipe-bend
+    const R0    = 1 / p;
+    const theta = p * nphi;
+    const x     = R0 * Math.sin(theta);
+    const y     = R0 * (1 - Math.cos(theta)) - 1;
+    return [x, y, v];
   }
-
-
-/**
- * Morph from cylinder (F1) to half-twist cylinder (F2).
- * @param {Array<[number,number]>} tp    Array of [t1,t2] pairs.
- * @param {number}                p     Morph parameter in [0,1].
- * @param {number}                [H]   Cylinder height (defaults through F01_morph).
- * @returns {Array<[number,number,number]>} Array of [x,y,z] for each input.
- */
-export function F12_morph(tp, p, H) {
-  // Start from full-cylinder output of F01_morph (p=1)
-  const base = F01_morph(tp, 1, H);
-  return tp.map(([t1, t2], i) => {
-    const [X1, Y1, Z1] = base[i];
-    // half-turn over tile, then interpolate by p
-    const theta_full = (t2 + Math.PI) / 2;
-    const theta_p    = p * theta_full;
-    // rotate cross-section around Z
-    const x = X1 * Math.cos(theta_p) - Y1 * Math.sin(theta_p);
-    const y = X1 * Math.sin(theta_p) + Y1 * Math.cos(theta_p);
-    const z = Z1;
-    return [x, y, z];
-  });
 }
 
+/**
+ * Morph from cylinder (F1) to half-twist cylinder (F2) for one point.
+ * @param {[number,number]} tp     [t1, t2] toroidal coordinates.
+ * @param {number}          p      Morph parameter in [0,1].
+ * @param {number}          H      Cylinder height.
+ * @returns {[number,number,number]} [x, y, z] Euclidean coordinates.
+ */
+export function F12_morph([t1, t2], p, H) {
+  // Base cylinder at p=1
+  const [X1, Y1, Z1] = F01_morph([t1, t2], 1, H);
+  const thetaFull   = (t2 + Math.PI) / 2;
+  const thetaP      = p * thetaFull;
+  // rotate cross-section around Z
+  const x = X1 * Math.cos(thetaP) - Y1 * Math.sin(thetaP);
+  const y = X1 * Math.sin(thetaP) + Y1 * Math.cos(thetaP);
+  const z = Z1;
+  return [x, y, z];
+}
 
 /**
- * Morph from twisted cylinder (F2) into torus by isometric pipe bending.
- * @param {Array<[number,number]>} tp      Array of [t1,t2] pairs.
- * @param {number}                p       Morph parameter in [0,1].
- * @param {number}                [R=1]   Target torus major radius.
- * @param {number}                [f=2]   Shrink factor for tube radius.
- * @param {string}                [anchor="center"]  "bottom" | "center" | "top"
- * @returns {Array<[number,number,number]>}  Array of [x,y,z] coordinates.
+ * Morph from twisted cylinder (F2) into torus by isometric pipe bending for one point.
+ * @param {[number,number]} tp      [t1, t2] toroidal coordinates.
+ * @param {number}          p       Morph parameter in [0,1].
+ * @param {number}          [R=1]   Torus major radius.
+ * @param {number}          [f=2]   Tube shrink factor.
+ * @param {string}          [anchor="center"]  "bottom"|"center"|"top".
+ * @returns {[number,number,number]} [x, y, z] Euclidean coordinates.
  */
-export function F23_morph(tp, p, R = 1, f = 2, anchor = "center") {
-    const twoPi = 2 * Math.PI;
-    const cylinderHeight = R * twoPi;
-  
-    // get twisted-cylinder coords at p=1
-    const base2 = F12_morph(tp, 1, cylinderHeight);
-  
-    // p≤0 → no bending
-    if (p <= 0) {
-      return base2;
-    }
-  
-    // choose vertical anchor offset
-    let uoffset = 0;
-    switch (anchor.toLowerCase()) {
-      case "bottom": uoffset = 1; break;
-      case "top":    uoffset = -1; break;
-      // center → 0
-    }
-  
-    return tp.map(([t1, t2], i) => {
-      const [X2, Y2, Z2] = base2[i];
-  
-      // arc-length coordinate along pipe
-      const u  = (t2 / twoPi) * cylinderHeight + uoffset;
-      const Rt = R / p;
-      const Θ  = u / Rt;
-  
-      // centerline of bent pipe
-      const Cx = Rt * (1 - Math.cos(Θ)) * Math.sqrt(3)/2;
-      const Cz = Rt * (0 + Math.sin(Θ)) * Math.sqrt(3)/2;
-      // principal normal
-      const Nx =  Math.cos(Θ);
-      const Nz = -Math.sin(Θ);
-  
-      // local cross-section offset
-      const rad_x = Nx * X2;
-      const rad_y = Y2;
-      const rad_z = Nz * X2;
-  
-      // shrink tube radius as p→1
-      const r0     = 1;
-      const rShrink = r0 / (1 + (f - 1) * p);
-  
-      // initial bent coordinates
-      let x = Cx + rShrink * rad_x;
-      let y =      rShrink * rad_y;   // Cy is zero
-      let z = Cz + rShrink * rad_z - (uoffset * (cylinderHeight / 2));
-  
-      // subtract shifting center of mass in X-Z plane: C = p*[1,0,-π·uoffset]
-      x -= p;
-      // y unchanged (−0)
-      z -= -p * Math.PI * uoffset; // ⇒ z += p·π·uoffset
-  
-      return [x, y, z];
-    });
+export function F23_morph([t1, t2], p, R = 1, f = 2, anchor = "center") {
+  const twoPi = 2 * Math.PI;
+  const cylinderHeight = R * twoPi;
+
+  // Twisted cylinder at p=1
+  const [X2, Y2, Z2] = F12_morph([t1, t2], 1, cylinderHeight);
+
+  if (p <= 0) {
+    return [X2, Y2, Z2];
   }
+
+  // Anchor offset: bottom=1, center=0, top=-1
+  let uoffset = 0;
+  switch (anchor.toLowerCase()) {
+    case 'bottom': uoffset = 1; break;
+    case 'top':    uoffset = -1; break;
+  }
+
+  // Arc-length coordinate along pipe
+  const u  = (t2 / twoPi) * cylinderHeight + uoffset;
+  const Rt = R / p;
+  const Theta = u / Rt;
+
+  // Centerline in X–Z (scaled by √3/2)
+  const cFactor = Math.sqrt(3) / 2;
+  const Cx = Rt * (1 - Math.cos(Theta)) * cFactor;
+  const Cz = Rt * Math.sin(Theta) * cFactor;
+
+  // Principal normal
+  const Nx =  Math.cos(Theta);
+  const Nz = -Math.sin(Theta);
+
+  // Cross-section offset
+  const radX = Nx * X2;
+  const radY = Y2;
+  const radZ = Nz * X2;
+
+  // Shrink tube radius
+  const r0 = 1;
+  const rShrink = r0 / (1 + (f - 1) * p);
+
+  // Initial bent coords
+  let x = Cx + rShrink * radX;
+  let y =      rShrink * radY;
+  let z = Cz + rShrink * radZ - uoffset * (cylinderHeight / 2);
+
+  // Subtract center-of-mass shift: p*[1,0,-π·uoffset]
+  x -= p;
+  z += p * Math.PI * uoffset;
+
+  return [x, y, z];
+}

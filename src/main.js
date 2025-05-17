@@ -5,6 +5,7 @@ import { KernelSize } from 'postprocessing';
 import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus, hexPhaseTile,
          F01_morph, F12_morph, F23_morph, gridCellPdf } from './torusUtils.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GridTile } from './GridTile.js';
 
 // Convert hue-saturation-value to RGB (all in [0,1])
 function hsv2rgb(h, s, v) {
@@ -32,6 +33,9 @@ function easeInOutCubic(t) {
 }
 
 // Get duration per stage (hold stages 2s, others use STAGE_DURATION)
+// function getWiremeshOpacity(dataMode) {
+//   return dataMode==='gridCells' ? 0.05 : 0.2;
+// }
 function getStageDuration(stage) {
   return (stage === 'holdStart' || stage === 'holdEnd')
     ? 2000
@@ -50,10 +54,6 @@ const NGRID = 15;
 const SCALE = 2 * Math.PI;
 const NTILE_RINGS = 3;
 const NTILE_I = 50;
-
-function getWiremeshOpacity(dataMode) {
-  return dataMode==='gridCells' ? 0.05 : 0.2;
-}
 
 // Rendering & data modes (manipulated via buttons)
 let dataMode      = 'torus1';   // 'torus1' | 'torus2' | 'torus3' | 'gridCells'
@@ -166,115 +166,19 @@ const gridCellsRgbV = (() => {
   ]);
 })();
 
-// --- Mesh & materials ------------------------------------------------
-let faceMesh, wireMesh;
-
-// Precompute line indices for wireframe
-const faceIdx = GvGeom.index.array;
-const lineIndices = [];
-for (let i = 0; i < faceIdx.length; i += 3) {
-  const a = faceIdx[i], b = faceIdx[i+1], c = faceIdx[i+2];
-  lineIndices.push(a, b, b, c, c, a);
-}
-
-function createMorphMesh() {
-  const geom = GvGeom.clone();
-  // share position buffer
-  const posAttr = geom.getAttribute('position');
-  console.log("posAttr:", posAttr)
-
-  const faceMat = new THREE.MeshPhongMaterial({
-    side: THREE.DoubleSide,
-    transparent: true,
-    depthWrite: true,       // allow back faces to blend through
-    opacity: 1.0,
-    blending: THREE.NormalBlending,
-    vertexColors: true,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1
+// --- Create GridTile instances ---
+// Peripheral static tiles
+const peripheralTiles = gridNodes(NTILE_RINGS)
+  .map(([cx, cy]) => {
+    const pos = [cx * SCALE, 0, cy * SCALE];
+    const tile = new GridTile(Tp, GvGeom, { position: pos, scale: SCALE });
+    tile.setVisibility(false);
+    scene.add(tile.group);
+    return tile;
   });
-  faceMesh = new THREE.Mesh(geom, faceMat);
-  scene.add(faceMesh);
-
-  // Wireframe mesh
-  const wireGeom = new THREE.BufferGeometry();
-  wireGeom.setAttribute('position', posAttr);
-  wireGeom.setIndex(lineIndices);
-  const wireMat = new THREE.LineBasicMaterial({
-    transparent: true,
-    depthWrite: true, 
-    vertexColors: false,
-    color: 0xffffff,
-    depthTest: false
-  });
-  wireMesh = new THREE.LineSegments(wireGeom, wireMat);
-  wireMesh.renderOrder = 1;
-  scene.add(wireMesh);
-}
-createMorphMesh();
-
-// --- Prepare tile clones for fade stage ---
-const tileGroups = [];
-const tileCenters = gridNodes(NTILE_RINGS);
-
-// Precompute boundary hexagon vertices (closed loop)
-const boundaryHex = hexPhaseTile();
-boundaryHex.push(boundaryHex[0]);
-tileCenters.forEach(([cx, cy]) => {
-
-  const cz = -1 / SCALE;
-  // const cz = 0;
-
-  const group = new THREE.Group();
-  // Scale the entire tile to match morph coordinates
-  group.scale.set(SCALE, SCALE, SCALE);
-  // Face clone
-  // Clone the original flat-hex geometry so it doesn’t morph
-  const faceGeomClone = GvGeom.clone();
-  // Initial color attribute copied from faceMesh
-  const origColor = faceMesh.geometry.getAttribute('color');
-  if (origColor) {
-    faceGeomClone.setAttribute('color', origColor.clone());
-  }
-  // Clone material for independent fade
-  const faceMatClone = faceMesh.material.clone();
-  faceMatClone.transparent = true;
-  faceMatClone.opacity = 1;
-  const meshClone = new THREE.Mesh(faceGeomClone, faceMatClone);
-  meshClone.material.vertexColors = true;
-  meshClone.position.set(cx, cz, cy);
-  group.add(meshClone);
-
-  // Bold boundary lines
-  const bVerts = [];
-  boundaryHex.forEach(([x, y]) => {
-    bVerts.push(x, 0, y);
-  });
-  const bGeom = new THREE.BufferGeometry();
-  bGeom.setAttribute('position', new THREE.Float32BufferAttribute(bVerts, 3));
-  const bMat = new THREE.LineBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 1,
-    linewidth: 2
-  });
-  const bLine = new THREE.Line(bGeom, bMat);
-  bLine.position.set(cx, cz, cy);
-  group.add(bLine);
-
-  scene.add(group);
-  tileGroups.push(group);
-});
-
-function onRestart(){
-  applyMorph(F01_morph(Tp, 0));
-  wireMesh.material.opacity = getWiremeshOpacity(dataMode);
-  stageIndex = 0;
-  reverse=false;
-  firstStep=true;
-  stageStart = performance.now();
-}
+// Central morphable tile
+const centralTile = new GridTile(Tp, GvGeom, { position: [0, 0, 0], scale: SCALE });
+scene.add(centralTile.group);
 
 // Lights
 scene.add(new THREE.AmbientLight(0xffffff, 3));
@@ -299,24 +203,12 @@ document.querySelectorAll('button').forEach(btn => {
 });
 
 function updateMaterial() {
-  // Always show both meshes
-  faceMesh.visible = true;
-  wireMesh.visible = true;
-
-  // Face always data, wireframe always plain
-  faceMesh.material.vertexColors = true;
-  wireMesh.material.vertexColors = false;
-  wireMesh.material.color.set(0xffffff);
-
-  faceMesh.material.needsUpdate = true;
-  wireMesh.material.needsUpdate = true;
-
+  // No longer needed with GridTile abstraction
   updateColors();
 }
 
 function updateColors() {
-  const geom = faceMesh.geometry;
-  const N = geom.getAttribute('position').count;
+  const N = Pv.length;
 
   // Determine which vertex‐based data to use
   let colorsArray;
@@ -332,7 +224,6 @@ function updateColors() {
       return hsv2rgb(h, 1, 1);
     });
   } else {
-    // no data mapping selected
     colorsArray = null;
   }
 
@@ -345,26 +236,38 @@ function updateColors() {
       colorAttr[3*i + 1] = c[1];
       colorAttr[3*i + 2] = c[2];
     }
-    // apply to face geometry only
-    geom.setAttribute('color', new THREE.BufferAttribute(colorAttr, 3));
-    geom.attributes.color.needsUpdate = true;
-    // Also update peripheral tile colors
-    tileGroups.forEach(group => {
-      const meshClone = group.children.find(c => c.type === 'Mesh');
-      if (meshClone) {
-        meshClone.geometry.setAttribute(
-          'color',
-          new THREE.BufferAttribute(colorAttr.slice(), 3)
-        );
-        meshClone.geometry.attributes.color.needsUpdate = true;
-      }
+
+    // Function to map phases and index to color RGB
+    function colorMap(tpt, i) {
+      return [colorAttr[3*i], colorAttr[3*i+1], colorAttr[3*i+2]];
+    }
+
+    centralTile.setColorMap((tpt, i) => {
+      return colorMap(tpt, i);
     });
+    peripheralTiles.forEach(tile =>
+      tile.setColorMap((tpt, i) => {
+        return colorMap(tpt, i);
+      })
+    );
     return;
   }
 
-  // No data mode → revert to plain coloring
-  faceMesh.material.vertexColors = false;
-  faceMesh.material.color.set(0x888888); // gray faces
+  // No data mode → set default gray color
+  centralTile.setColorMap(() => [0.5333333333333333, 0.5333333333333333, 0.5333333333333333]);
+  peripheralTiles.forEach(tile => tile.setColorMap(() => [0.5333333333333333, 0.5333333333333333, 0.5333333333333333]));
+}
+
+function onRestart() {
+  centralTile.setVisibility(false);
+  peripheralTiles.forEach(tile => {
+    tile.setVisibility(true);
+    tile.setOpacity(1);
+  });
+  stageIndex = 0;
+  reverse = false;
+  firstStep = false;
+  stageStart = performance.now();
 }
 
 // --- Animation loop --------------------------------------------------
@@ -372,7 +275,6 @@ let stageIndex = 0;
 let stageStart = performance.now();
 let reverse = false;
 let firstStep = false;
-
 
 updateColors();
 onRestart();
@@ -389,65 +291,56 @@ function animate() {
 
   if (stage === 'holdStart') {
     // Initial pause: show all tile clones fully, hide morph
-
     if (firstStep) {
-      faceMesh.visible = false;
-      wireMesh.visible = false;
-      tileGroups.forEach(group => {
-        group.visible = true;
-        group.children.forEach(child => {
-          child.material.opacity = 1;
-        });
+      centralTile.setVisibility(false);
+      peripheralTiles.forEach(tile => {
+        tile.setVisibility(true);
+        tile.setOpacity(1);
       });
       camera.fov = 40;
       camera.updateProjectionMatrix();
     }
 
   } else if (stage === 'fade') {
-    // Hide morph meshes
-    faceMesh.visible = true; // stays fully opaque
-    // Show and fade tile clones
     const fadeVal = reverse ? rawT : 1 - rawT;
-    wireMesh.visible = true;
-    wireMesh.material.opacity = (1-fadeVal) * getWiremeshOpacity(dataMode);
-    tileGroups.forEach((group, idx) => {
-      // The first tile returned by gridNodes is the center
-      const isCenter = (idx === 0);
-      group.visible = true;
-      group.children.forEach(child => {
-        child.material.opacity = isCenter ? 1 : fadeVal;
-      });
+    centralTile.setVisibility(true);
+    peripheralTiles.forEach((tile, idx) => {
+      const alpha = idx === 0 ? 1 : fadeVal;
+      tile.setOpacity(alpha);
+      tile.setVisibility(true);
     });
-    // Zoom camera: forward (wide→tight), reverse (tight→wide)
     camera.fov = THREE.MathUtils.lerp(40, 20, baseT);
     camera.updateProjectionMatrix();
 
   } else if (stage === 'cylinder') {
-    // Hide the tiled meshes, show the central meshes
     if (firstStep) {
-      tileGroups.forEach(group => group.visible = false);
-      faceMesh.visible = true;
-      wireMesh.visible = true;
+      peripheralTiles.forEach(tile => tile.setVisibility(false));
+      centralTile.setVisibility(true);
     }
-    const out = F01_morph(Tp, t);
-    applyMorph(out);
+    centralTile.setTransform(pt => F01_morph(pt, t));
 
   } else if (stage === 'twist') {
-    const out = F12_morph(Tp, t);
-    applyMorph(out);
+    if (firstStep) {
+      peripheralTiles.forEach(tile => tile.setVisibility(false));
+      centralTile.setVisibility(true);
+    }
+    centralTile.setTransform(pt => F12_morph(pt, t));
 
   } else if (stage === 'torus') {
-    const out = F23_morph(Tp, t);
-    applyMorph(out);
+    if (firstStep) {
+      peripheralTiles.forEach(tile => tile.setVisibility(false));
+      centralTile.setVisibility(true);
+    }
+    centralTile.setTransform(pt => F23_morph(pt, t));
 
   } else if (stage === 'holdEnd') {
-    // Final pause: hold full torus
     if (firstStep) {
-      faceMesh.visible = true;
-      wireMesh.visible = true;
+      centralTile.setVisibility(true);
+      peripheralTiles.forEach(tile => tile.setVisibility(false));
     }
-    const out = F23_morph(Tp, 1);
-    applyMorph(out);
+    centralTile.setTransform(pt => F23_morph(pt, 1));
+    camera.fov = 20;
+    camera.updateProjectionMatrix();
   }
 
   if (dt >= dur) {
@@ -478,16 +371,3 @@ function animate() {
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);
-
-// Apply new morph output to mesh
-function applyMorph(out) {
-  // (the faceMesh and wireframe objects hold references to the same 'geometry' object)
-  const pos = faceMesh.geometry.getAttribute('position');
-  for (let i = 0; i < out.length; i++) {
-    const [x, y, z] = out[i];
-    pos.setXYZ(i, x, y, z);
-  }
-  pos.needsUpdate = true;
-  faceMesh.geometry.computeVertexNormals();
-  // Because wireMesh shares the position buffer attribute, it is updated automatically.
-}
