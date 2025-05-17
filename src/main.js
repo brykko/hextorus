@@ -31,11 +31,19 @@ function easeInOutCubic(t) {
     : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+// Get duration per stage (hold stages 2s, others use STAGE_DURATION)
+function getStageDuration(stage) {
+  return (stage === 'holdStart' || stage === 'holdEnd')
+    ? 2000
+    : STAGE_DURATION;
+}
+
 // --- Configuration --------------------------------------------------
 const WIDTH = 800;
 const HEIGHT = 600;
 const STAGE_DURATION = 3000; // ms per morph stage
-const STAGES = ['fade', 'cylinder', 'twist', 'torus'];
+// Animation stages: pause at start, fade, morph steps, pause at end
+const STAGES = ['holdStart', 'fade', 'cylinder', 'twist', 'torus', 'holdEnd'];
 const FPS = 60;
 const HEX_SIDE = 1 / Math.sqrt(3);
 const NGRID = 15;
@@ -357,20 +365,31 @@ function animate() {
   const now = performance.now();
   const dt  = now - stageStart;
   const stage = STAGES[stageIndex];
-  const rawT = Math.min(dt / STAGE_DURATION, 1);
+  const dur   = getStageDuration(stage);
+  const rawT  = Math.min(dt / dur, 1);
   // Compute base fraction and apply easing
   const baseT = reverse ? 1 - rawT : rawT;
   const t     = easeInOutCubic(baseT);
 
-  if (stage === 'fade') {
+  if (stage === 'holdStart') {
+    // Initial pause: show all tile clones fully, hide morph
+    faceMesh.visible = false;
+    wireMesh.visible = false;
+    tileGroups.forEach(group => {
+      group.visible = true;
+      group.children.forEach(child => {
+        child.material.opacity = 1;
+      });
+    });
+    camera.fov = 40;
+    camera.updateProjectionMatrix();
+
+  } else if (stage === 'fade') {
     // Hide morph meshes
     faceMesh.visible = false;
     wireMesh.visible = false;
     // Show and fade tile clones
     const fadeVal = reverse ? rawT : 1 - rawT;
-    if (firstStep) {
-      // console.log("fadeval:", fadeVal);
-    }
     tileGroups.forEach((group, idx) => {
       // The first tile returned by gridNodes is the center
       const isCenter = (idx === 0);
@@ -382,30 +401,38 @@ function animate() {
     // Zoom camera: forward (wide→tight), reverse (tight→wide)
     camera.fov = THREE.MathUtils.lerp(40, 20, baseT);
     camera.updateProjectionMatrix();
-  } else {
-    // Hide tile clones
-    tileGroups.forEach(group => group.visible = false);
-    // Show morph meshes
-    faceMesh.visible = true;
-    wireMesh.visible = true;
-    // Existing morph logic...
-    if (stage === 'cylinder') {
-      const Tp = Tv.map(([t1, t2]) => [t1, t2]);
-      const out = F01_morph(Tp, t);
-      applyMorph(out);
-    } else if (stage === 'twist') {
-      const out = F12_morph(Tv.map(([t1,t2])=>[t1,t2]), t);
-      applyMorph(out);
-    } else if (stage === 'torus') {
-      const out = F23_morph(Tv.map(([t1,t2])=>[t1,t2]), t);
-      applyMorph(out);
+
+  } else if (stage === 'cylinder') {
+    // Hide the tiled meshes, show the central meshes
+    if (firstStep) {
+      tileGroups.forEach(group => group.visible = false);
+      faceMesh.visible = true;
+      wireMesh.visible = true;
     }
+    const Tp = Tv.map(([t1, t2]) => [t1, t2]);
+    const out = F01_morph(Tp, t);
+    applyMorph(out);
+
+  } else if (stage === 'twist') {
+    const out = F12_morph(Tv.map(([t1, t2]) => [t1, t2]), t);
+    applyMorph(out);
+
+  } else if (stage === 'torus') {
+    const out = F23_morph(Tv.map(([t1, t2]) => [t1, t2]), t);
+    applyMorph(out);
+
+  } else if (stage === 'holdEnd') {
+    // Final pause: hold full torus
+    if (firstStep) {
+      faceMesh.visible = true;
+      wireMesh.visible = true;
+    }
+    const out = F23_morph(Tv.map(([t1, t2]) => [t1, t2]), 1);
+    applyMorph(out);
   }
 
-  if (dt >= STAGE_DURATION) {
-    // console.log("Stage index: ", stageIndex);
+  if (dt >= dur) {
     // advance or reverse through stages
-
     if (reverse) {
       stageIndex--;
       if (stageIndex < 0) {
