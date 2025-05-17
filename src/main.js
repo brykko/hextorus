@@ -51,6 +51,10 @@ const SCALE = 2 * Math.PI;
 const NTILE_RINGS = 3;
 const NTILE_I = 50;
 
+function getWiremeshOpacity(dataMode) {
+  return dataMode==='gridCells' ? 0.05 : 0.2;
+}
+
 // Rendering & data modes (manipulated via buttons)
 let dataMode      = 'torus1';   // 'torus1' | 'torus2' | 'torus3' | 'gridCells'
 
@@ -122,6 +126,7 @@ const GvGeom = buildBufferGeometry(Pv, tri);
 
 // 2) Toroidal phases (unwrapped)
 const Tv = euclidean2torus(Pv);  // [[t1,t2,t3],...]
+const Tp = Tv.map(([t1, t2]) => [t1, t2]); // with 2 dims only
 
 // // 3) Edge interpolation for hex tile boundary
 // const tileVerts = hexPhaseTile();
@@ -177,13 +182,12 @@ function createMorphMesh() {
   // share position buffer
   const posAttr = geom.getAttribute('position');
   console.log("posAttr:", posAttr)
-  
 
   const faceMat = new THREE.MeshPhongMaterial({
     side: THREE.DoubleSide,
     transparent: true,
-    depthWrite: false,       // allow back faces to blend through
-    opacity: 0.7,
+    depthWrite: true,       // allow back faces to blend through
+    opacity: 1.0,
     blending: THREE.NormalBlending,
     vertexColors: true,
     polygonOffset: true,
@@ -200,7 +204,6 @@ function createMorphMesh() {
   const wireMat = new THREE.LineBasicMaterial({
     transparent: true,
     depthWrite: true, 
-    opacity: 0.05,
     vertexColors: false,
     color: 0xffffff,
     depthTest: false
@@ -264,6 +267,15 @@ tileCenters.forEach(([cx, cy]) => {
   tileGroups.push(group);
 });
 
+function onRestart(){
+  applyMorph(F01_morph(Tp, 0));
+  wireMesh.material.opacity = getWiremeshOpacity(dataMode);
+  stageIndex = 0;
+  reverse=false;
+  firstStep=true;
+  stageStart = performance.now();
+}
+
 // Lights
 scene.add(new THREE.AmbientLight(0xffffff, 3));
 
@@ -271,7 +283,7 @@ scene.add(new THREE.AmbientLight(0xffffff, 3));
 const gui = new GUI();
 const controls = {
   data: dataMode,
-  restart: () => { stageIndex = 0; reverse=false; firstStep=true; stageStart = performance.now(); }
+  restart: () => { onRestart() }
 };
 gui.add(controls, 'data', ['torus1','torus2','torus3','gridCells'])
   .name('Data').onChange(v => { dataMode = v; updateColors(); });
@@ -361,6 +373,10 @@ let stageStart = performance.now();
 let reverse = false;
 let firstStep = false;
 
+
+updateColors();
+onRestart();
+
 function animate() {
   const now = performance.now();
   const dt  = now - stageStart;
@@ -373,23 +389,27 @@ function animate() {
 
   if (stage === 'holdStart') {
     // Initial pause: show all tile clones fully, hide morph
-    faceMesh.visible = false;
-    wireMesh.visible = false;
-    tileGroups.forEach(group => {
-      group.visible = true;
-      group.children.forEach(child => {
-        child.material.opacity = 1;
+
+    if (firstStep) {
+      faceMesh.visible = false;
+      wireMesh.visible = false;
+      tileGroups.forEach(group => {
+        group.visible = true;
+        group.children.forEach(child => {
+          child.material.opacity = 1;
+        });
       });
-    });
-    camera.fov = 40;
-    camera.updateProjectionMatrix();
+      camera.fov = 40;
+      camera.updateProjectionMatrix();
+    }
 
   } else if (stage === 'fade') {
     // Hide morph meshes
-    faceMesh.visible = false;
-    wireMesh.visible = false;
+    faceMesh.visible = true; // stays fully opaque
     // Show and fade tile clones
     const fadeVal = reverse ? rawT : 1 - rawT;
+    wireMesh.visible = true;
+    wireMesh.material.opacity = (1-fadeVal) * getWiremeshOpacity(dataMode);
     tileGroups.forEach((group, idx) => {
       // The first tile returned by gridNodes is the center
       const isCenter = (idx === 0);
@@ -409,16 +429,15 @@ function animate() {
       faceMesh.visible = true;
       wireMesh.visible = true;
     }
-    const Tp = Tv.map(([t1, t2]) => [t1, t2]);
     const out = F01_morph(Tp, t);
     applyMorph(out);
 
   } else if (stage === 'twist') {
-    const out = F12_morph(Tv.map(([t1, t2]) => [t1, t2]), t);
+    const out = F12_morph(Tp, t);
     applyMorph(out);
 
   } else if (stage === 'torus') {
-    const out = F23_morph(Tv.map(([t1, t2]) => [t1, t2]), t);
+    const out = F23_morph(Tp, t);
     applyMorph(out);
 
   } else if (stage === 'holdEnd') {
@@ -427,7 +446,7 @@ function animate() {
       faceMesh.visible = true;
       wireMesh.visible = true;
     }
-    const out = F23_morph(Tv.map(([t1, t2]) => [t1, t2]), 1);
+    const out = F23_morph(Tp, 1);
     applyMorph(out);
   }
 
