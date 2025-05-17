@@ -24,6 +24,13 @@ function hsv2rgb(h, s, v) {
   }
 }
 
+// Cubic ease-in-out for smooth transitions
+function easeInOutCubic(t) {
+  return t < 0.5
+    ? 4 * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
 // --- Configuration --------------------------------------------------
 const WIDTH = 800;
 const HEIGHT = 600;
@@ -161,13 +168,15 @@ function createMorphMesh() {
   const geom = GvGeom.clone();
   // share position buffer
   const posAttr = geom.getAttribute('position');
+  console.log("posAttr:", posAttr)
+  
 
   const faceMat = new THREE.MeshPhongMaterial({
     side: THREE.DoubleSide,
     transparent: true,
     depthWrite: false,       // allow back faces to blend through
-    opacity: 1.0,
-    blending: THREE.AdditiveBlending,
+    opacity: 0.7,
+    blending: THREE.NormalBlending,
     vertexColors: true,
     polygonOffset: true,
     polygonOffsetFactor: 1,
@@ -183,7 +192,7 @@ function createMorphMesh() {
   const wireMat = new THREE.LineBasicMaterial({
     transparent: true,
     depthWrite: true, 
-    opacity: 0.1,
+    opacity: 0.05,
     vertexColors: false,
     color: 0xffffff,
     depthTest: false
@@ -203,6 +212,9 @@ const boundaryHex = hexPhaseTile();
 boundaryHex.push(boundaryHex[0]);
 tileCenters.forEach(([cx, cy]) => {
 
+  const cz = -1 / SCALE;
+  // const cz = 0;
+
   const group = new THREE.Group();
   // Scale the entire tile to match morph coordinates
   group.scale.set(SCALE, SCALE, SCALE);
@@ -220,13 +232,13 @@ tileCenters.forEach(([cx, cy]) => {
   faceMatClone.opacity = 1;
   const meshClone = new THREE.Mesh(faceGeomClone, faceMatClone);
   meshClone.material.vertexColors = true;
-  meshClone.position.set(cx, -1, cy);
+  meshClone.position.set(cx, cz, cy);
   group.add(meshClone);
 
   // Bold boundary lines
   const bVerts = [];
   boundaryHex.forEach(([x, y]) => {
-    bVerts.push(x, -1, y);
+    bVerts.push(x, 0, y);
   });
   const bGeom = new THREE.BufferGeometry();
   bGeom.setAttribute('position', new THREE.Float32BufferAttribute(bVerts, 3));
@@ -237,7 +249,7 @@ tileCenters.forEach(([cx, cy]) => {
     linewidth: 2
   });
   const bLine = new THREE.Line(bGeom, bMat);
-  bLine.position.set(cx, 0, cy);
+  bLine.position.set(cx, cz, cy);
   group.add(bLine);
 
   scene.add(group);
@@ -251,7 +263,7 @@ scene.add(new THREE.AmbientLight(0xffffff, 3));
 const gui = new GUI();
 const controls = {
   data: dataMode,
-  restart: () => { stageIndex = 0; stageStart = performance.now(); }
+  restart: () => { stageIndex = 0; reverse=false; firstStep=true; stageStart = performance.now(); }
 };
 gui.add(controls, 'data', ['torus1','torus2','torus3','gridCells'])
   .name('Data').onChange(v => { dataMode = v; updateColors(); });
@@ -339,14 +351,16 @@ function updateColors() {
 let stageIndex = 0;
 let stageStart = performance.now();
 let reverse = false;
+let firstStep = false;
 
 function animate() {
   const now = performance.now();
   const dt  = now - stageStart;
   const stage = STAGES[stageIndex];
   const rawT = Math.min(dt / STAGE_DURATION, 1);
-  // Reverse the morph fraction within each stage if reversing
-  const t = reverse ? 1 - rawT : rawT;
+  // Compute base fraction and apply easing
+  const baseT = reverse ? 1 - rawT : rawT;
+  const t     = easeInOutCubic(baseT);
 
   if (stage === 'fade') {
     // Hide morph meshes
@@ -354,6 +368,9 @@ function animate() {
     wireMesh.visible = false;
     // Show and fade tile clones
     const fadeVal = reverse ? rawT : 1 - rawT;
+    if (firstStep) {
+      // console.log("fadeval:", fadeVal);
+    }
     tileGroups.forEach((group, idx) => {
       // The first tile returned by gridNodes is the center
       const isCenter = (idx === 0);
@@ -363,11 +380,7 @@ function animate() {
       });
     });
     // Zoom camera: forward (wide→tight), reverse (tight→wide)
-    if (!reverse) {
-      camera.fov = THREE.MathUtils.lerp(40, 20, rawT);
-    } else {
-      camera.fov = THREE.MathUtils.lerp(20, 40, rawT);
-    }
+    camera.fov = THREE.MathUtils.lerp(40, 20, baseT);
     camera.updateProjectionMatrix();
   } else {
     // Hide tile clones
@@ -390,7 +403,9 @@ function animate() {
   }
 
   if (dt >= STAGE_DURATION) {
+    // console.log("Stage index: ", stageIndex);
     // advance or reverse through stages
+
     if (reverse) {
       stageIndex--;
       if (stageIndex < 0) {
@@ -405,6 +420,9 @@ function animate() {
       }
     }
     stageStart = now;
+    firstStep = true;
+  } else {
+    firstStep = false;
   }
 
   orbitControls.update();
