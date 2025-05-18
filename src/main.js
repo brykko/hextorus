@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GUI } from 'dat.gui';
 import { EffectComposer, EffectPass, RenderPass, BloomEffect } from 'postprocessing';
 import { KernelSize } from 'postprocessing';
-import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus, hexPhaseTile,
+import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus,
          F01_morph, F12_morph, F23_morph, gridCellPdf } from './torusUtils.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GridTile } from './GridTile.js';
@@ -32,13 +32,9 @@ function easeInOutCubic(t) {
     : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-// Get duration per stage (hold stages 2s, others use STAGE_DURATION)
-// function getWiremeshOpacity(dataMode) {
-//   return dataMode==='gridCells' ? 0.05 : 0.2;
-// }
 function getStageDuration(stage) {
   return (stage === 'holdStart' || stage === 'holdEnd')
-    ? 2000
+    ? 1000
     : STAGE_DURATION;
 }
 
@@ -53,7 +49,7 @@ const HEX_SIDE = 1 / Math.sqrt(3);
 const NGRID = 15;
 const SCALE = 2 * Math.PI;
 const NTILE_RINGS = 3;
-const NTILE_I = 50;
+// const NTILE_I = 50;
 
 // Rendering & data modes (manipulated via buttons)
 let dataMode      = 'torus1';   // 'torus1' | 'torus2' | 'torus3' | 'gridCells'
@@ -97,36 +93,13 @@ orbitControls.dampingFactor = 0.1;
 
 // --- Prepare geometry data -------------------------------------------
 // 1) Flat hexagon grid
-let Pv = gridNodes(NGRID + 1)
-  .map(([x, y]) => [ x / (NGRID + 1) * HEX_SIDE,
-                     y / (NGRID + 1) * HEX_SIDE ]);
+let Pv = gridNodes(NGRID)
+  .map(([x, y]) => [ x / (NGRID) * HEX_SIDE,
+                     y / (NGRID) * HEX_SIDE ]);
 Pv = rotate2d(Pv, Math.PI / 6);
-const spacing = HEX_SIDE / (NGRID + 1);
-const tri      = constrainedDelaunay(Pv, spacing);  // 1-based indices
-
-// Vertex arrays for Three.js BufferGeometry
-function buildBufferGeometry(vertices2D, faces) {
-  const verts = [];
-  for (const [x, y] of vertices2D) {
-    verts.push(x, 0, y);
-  }
-  const indices = [];
-  for (const [i, j, k] of faces) {
-    indices.push(i-1, j-1, k-1);
-  }
-  const geom = new THREE.BufferGeometry();
-  geom.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-  geom.setIndex(indices);
-  geom.computeVertexNormals();
-  return geom;
-}
-
-// Build vertex positions and face centroids
-const GvGeom = buildBufferGeometry(Pv, tri);
 
 // 2) Toroidal phases (unwrapped)
 const Tv = euclidean2torus(Pv);  // [[t1,t2,t3],...]
-const Tp = Tv.map(([t1, t2]) => [t1, t2]); // with 2 dims only
 
 // // 3) Edge interpolation for hex tile boundary
 // const tileVerts = hexPhaseTile();
@@ -166,19 +139,25 @@ const gridCellsRgbV = (() => {
   ]);
 })();
 
-// --- Create GridTile instances ---
-// Peripheral static tiles
-const peripheralTiles = gridNodes(NTILE_RINGS)
-  .map(([cx, cy]) => {
-    const pos = [cx * SCALE, 0, cy * SCALE];
-    const tile = new GridTile(Tp, GvGeom, { position: pos, scale: SCALE });
-    tile.setVisibility(false);
-    scene.add(tile.group);
-    return tile;
-  });
-// Central morphable tile
-const centralTile = new GridTile(Tp, GvGeom, { position: [0, 0, 0], scale: SCALE });
+// --- Create GridTile instances using template and static cloning ---
+// Template tile at origin; builds its own geometry internally
+const templateTile = new GridTile(NGRID, { position: [0, 0, 0], scale: SCALE });
+// templateTile.setTransform(pt => F01_morph(pt, 0));
+
+// Clone tiles for all centers (first is the central tile)
+const allTiles = GridTile.tile(templateTile, NTILE_RINGS, SCALE);
+const centralTile = allTiles[0];
+const peripheralTiles = allTiles.slice(1);
+// Add all tiles to the scene
+allTiles.forEach(tile => scene.add(tile.group));
 scene.add(centralTile.group);
+
+// Initialize visibility and opacity
+// centralTile.setVisibility(false);
+allTiles.forEach(tile => {
+  tile.setVisibility(true);
+  tile.setOpacity(1);
+});
 
 // Lights
 scene.add(new THREE.AmbientLight(0xffffff, 3));
@@ -202,10 +181,6 @@ document.querySelectorAll('button').forEach(btn => {
   }
 });
 
-function updateMaterial() {
-  // No longer needed with GridTile abstraction
-  updateColors();
-}
 
 function updateColors() {
   const N = Pv.length;
@@ -258,15 +233,27 @@ function updateColors() {
   peripheralTiles.forEach(tile => tile.setColorMap(() => [0.5333333333333333, 0.5333333333333333, 0.5333333333333333]));
 }
 
+function fcnScaled(fcn, pt) {
+  const [x,y,z] = fcn(pt);
+  return [x/SCALE, y/SCALE, z/SCALE];
+}
+
+function setMorph(fcn, t) {
+  function fmorph(pt) {
+    return fcn(pt, t);
+  }
+  centralTile.setTransform(pt => fcnScaled(fmorph, pt));
+}
+
 function onRestart() {
-  centralTile.setVisibility(false);
+  centralTile.setVisibility(true);
   peripheralTiles.forEach(tile => {
     tile.setVisibility(true);
     tile.setOpacity(1);
   });
   stageIndex = 0;
   reverse = false;
-  firstStep = false;
+  firstStep = true;
   stageStart = performance.now();
 }
 
@@ -278,6 +265,8 @@ let firstStep = false;
 
 updateColors();
 onRestart();
+
+// console.log(centralTile.faceMesh);
 
 function animate() {
   const now = performance.now();
@@ -292,7 +281,8 @@ function animate() {
   if (stage === 'holdStart') {
     // Initial pause: show all tile clones fully, hide morph
     if (firstStep) {
-      centralTile.setVisibility(false);
+      centralTile.setVisibility(true);
+      setMorph(F01_morph, 0);
       peripheralTiles.forEach(tile => {
         tile.setVisibility(true);
         tile.setOpacity(1);
@@ -302,14 +292,13 @@ function animate() {
     }
 
   } else if (stage === 'fade') {
-    const fadeVal = reverse ? rawT : 1 - rawT;
     centralTile.setVisibility(true);
+    setMorph(F01_morph, 0);
     peripheralTiles.forEach((tile, idx) => {
-      const alpha = idx === 0 ? 1 : fadeVal;
-      tile.setOpacity(alpha);
+      tile.setOpacity(1-t);
       tile.setVisibility(true);
     });
-    camera.fov = THREE.MathUtils.lerp(40, 20, baseT);
+    camera.fov = THREE.MathUtils.lerp(40, 20, t);
     camera.updateProjectionMatrix();
 
   } else if (stage === 'cylinder') {
@@ -317,28 +306,29 @@ function animate() {
       peripheralTiles.forEach(tile => tile.setVisibility(false));
       centralTile.setVisibility(true);
     }
-    centralTile.setTransform(pt => F01_morph(pt, t));
+    setMorph(F01_morph, t);
+
 
   } else if (stage === 'twist') {
     if (firstStep) {
       peripheralTiles.forEach(tile => tile.setVisibility(false));
       centralTile.setVisibility(true);
     }
-    centralTile.setTransform(pt => F12_morph(pt, t));
+    setMorph(F12_morph, t);
 
   } else if (stage === 'torus') {
     if (firstStep) {
       peripheralTiles.forEach(tile => tile.setVisibility(false));
       centralTile.setVisibility(true);
     }
-    centralTile.setTransform(pt => F23_morph(pt, t));
+    setMorph(F23_morph, t);
 
   } else if (stage === 'holdEnd') {
     if (firstStep) {
       centralTile.setVisibility(true);
       peripheralTiles.forEach(tile => tile.setVisibility(false));
     }
-    centralTile.setTransform(pt => F23_morph(pt, 1));
+    setMorph(F23_morph, 1);
     camera.fov = 20;
     camera.updateProjectionMatrix();
   }
