@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { hexPhaseTile } from './torusUtils.js';
+import { hexPhaseTile, wrapToRhombus } from './torusUtils.js';
 import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus } from './torusUtils.js';
 
 const HEX_SIDE = 1 / Math.sqrt(3);
@@ -25,12 +25,24 @@ export class GridTile {
     let torusCoords, baseGeom;
     // build Euclidean vertices for unit tile
     let Pv = gridNodes(numRings);
-    Pv = Pv.map(([x, y]) => [ 
-      x / (numRings) * HEX_SIDE,
-      y / (numRings) * HEX_SIDE ]);
-    Pv = rotate2d(Pv, Math.PI / 6);
-    // triangulate without filtering
 
+    // scale into world units
+    Pv = Pv.map(([x, y]) => [
+      (x / numRings) * HEX_SIDE,
+      (y / numRings) * HEX_SIDE
+    ]);
+
+      // default hexagon: rotate to point-up
+      Pv = rotate2d(Pv, Math.PI / 6);
+
+    // shape-specific transform
+    const shape = options.shape || 'hexagon';
+    if (shape === 'rhombus') {
+      // wrap points into rhombus tile
+      Pv = Pv.map(wrapToRhombus);
+    }
+
+    // triangulate without filtering
     const spacing = HEX_SIDE / (numRings);
     const tri = constrainedDelaunay(Pv, spacing);
     // build BufferGeometry

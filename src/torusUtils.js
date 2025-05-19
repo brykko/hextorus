@@ -80,7 +80,6 @@ export function hexPhaseTile() {
   }
 
 
-
 /**
  * Convert 2D Euclidean coordinates into (hexagonal) toroidal coordinates.
  * @param {number[][]} pEuclidean - Array of [x,y] pairs.
@@ -98,6 +97,37 @@ return pEuclidean.map(([x, y]) => {
     2 * Math.PI * t3
     ];
 });
+}
+
+
+/**
+ * Wrap a single [x,y] point into the unit‐rhombus phase tile.
+ * @param {[number,number]} pt  [x, y] point (spacing = 1)
+ * @returns {[number,number]}    [xW, yW] wrapped point
+ */
+export function wrapToRhombus([x0, y0]) {
+  const r     = Math.sqrt(3); // √3
+  const halfR = r / 2;
+
+  // how many full vertical half‐periods?
+  const nYCycles = Math.floor(y0 / halfR);
+
+  // wrap y into [0, halfR)
+  const yW = y0 - nYCycles * halfR;
+
+  // shift x for each y‐cycle
+  const xShift = mod(yW / r, 1);
+  const xBase  = x0 + nYCycles * 0.5;
+
+  // wrap x into [0,1) around the shift
+  const xW = mod(xBase - xShift, 1) + xShift;
+
+  return [xW, yW];
+}
+
+// Positive modulo helper
+function mod(a, m) {
+  return ((a % m) + m) % m;
 }
 
 

@@ -141,7 +141,7 @@ const gridCellsRgbV = (() => {
 
 // --- Create GridTile instances using template and static cloning ---
 // Template tile at origin; builds its own geometry internally
-const templateTile = new GridTile(NGRID, { position: [0, 0, 0], scale: SCALE });
+const templateTile = new GridTile(NGRID, { position: [0, 0, 0], scale: SCALE, shape: 'hexagon' });
 // templateTile.setTransform(pt => F01_morph(pt, 0));
 
 // Clone tiles for all centers (first is the central tile)
