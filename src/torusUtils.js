@@ -102,6 +102,7 @@ return pEuclidean.map(([x, y]) => {
 
 /**
  * Wrap a single [x,y] point into the unit‐rhombus phase tile.
+ * The rhombus is defined with two sides parallel to x
  * @param {[number,number]} pt  [x, y] point (spacing = 1)
  * @returns {[number,number]}    [xW, yW] wrapped point
  */
@@ -124,6 +125,46 @@ export function wrapToRhombus([x0, y0]) {
 
   return [xW, yW];
 }
+
+
+/**
+ * Generate a rhombus‐shaped meshgrid in torus‐phase space and map it into Euclidean coords.
+ *
+ * @param {number} numRings 
+ *   Number of subdivisions per side. You’ll get (numRings+1)² points.
+ * @returns {object} 
+ *   { 
+ *     phaseCoords: Array<[t1, t2]>,   // toroidal phases in [0,2π]
+ *     euclidCoords: Array<[x,  y]>    // mapped into the rhombus domain
+ *   }
+ */
+export function buildRhombusMeshGrid(numRings) {
+  const N = numRings;
+  const phaseCoords = [];
+
+  const twoPi = 2 * Math.PI;
+
+  // 1) Sample uniformly in [0,2π] × [0,2π]
+  for (let j = 0; j <= N; j++) {
+    for (let i = 0; i <= N; i++) {
+      const t1 = (i/N - 0.5) * twoPi;
+      const t2 = (j/N - 0.5) * twoPi;
+      phaseCoords.push([t1, t2]);
+    }
+  }
+
+  // 2) Linear map (t1,t2) → rhombus (x,y):
+  //    x = t1 + 0.5*t2
+  //    y = (√3/2)*t2
+  const sqrt3 = Math.sqrt(3);
+  const euclidCoords = phaseCoords.map(([t1, t2]) => [
+    t1/twoPi + 0.5 * t2/twoPi,
+    (sqrt3 / 2) * (t2/twoPi)
+  ]);
+
+  return { phaseCoords, euclidCoords };
+}
+
 
 // Positive modulo helper
 function mod(a, m) {
@@ -193,6 +234,9 @@ export function constrainedDelaunay(P, sideLengthLimit, tol = 1e-6) {
     const d23 = Math.hypot(x3 - x2, y3 - y2);
     const d31 = Math.hypot(x1 - x3, y1 - y3);
     const dmax = Math.max(d12, d23, d31);
+    if (dmax <= limit) {
+      // console.log("max side length: ", dmax);
+    }
     return dmax <= limit;
   });
 }

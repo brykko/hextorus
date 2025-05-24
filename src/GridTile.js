@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { hexPhaseTile, wrapToRhombus } from './torusUtils.js';
+import { hexPhaseTile, buildRhombusMeshGrid} from './torusUtils.js';
 import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus } from './torusUtils.js';
 
 const HEX_SIDE = 1 / Math.sqrt(3);
@@ -16,47 +16,66 @@ const HEX_SIDE = 1 / Math.sqrt(3);
  * - Legacy object form with torusCoords and baseGeom.
  */
 export class GridTile {
-  /**
-   * @param {number|object} config
-   *   If a number: interpreted as grid resolution (numRings).
-   *   If an object: { torusCoords, baseGeom, position?, scale? } as before.
-   */
   constructor(numRings, options = {}) {
-    let torusCoords, baseGeom;
-    // build Euclidean vertices for unit tile
-    let Pv = gridNodes(numRings);
+    /* 
+    * Suggested change:
+    *
+    * If using the 'hexagon' tile shape, we build the final coordinate grid
+    * using gridNodes(), which returns the ready-made hexagon tile. We
+    * then derive the toroidal coords from the Euclidean coords.
+    * 
+    * If using the 'rhombus' tile shape, we instead *begin* by creating a
+    * (square) grid of toroidal coords first, and then transform it to
+    * generate the rhombus tile coords.
+    */
 
-    // scale into world units
-    Pv = Pv.map(([x, y]) => [
-      (x / numRings) * HEX_SIDE,
-      (y / numRings) * HEX_SIDE
-    ]);
-
-      // default hexagon: rotate to point-up
-      Pv = rotate2d(Pv, Math.PI / 6);
-
-    // shape-specific transform
     const shape = options.shape || 'hexagon';
-    if (shape === 'rhombus') {
-      // wrap points into rhombus tile
-      Pv = Pv.map(wrapToRhombus);
+    let Pv;
+    let spacing;
+    let tri;
+
+    if (shape === 'hexagon') {
+    // build Euclidean vertices for unit tile
+      Pv = gridNodes(numRings);
+
+      // scale into world units
+      Pv = Pv.map(([x, y]) => [
+        (x / (numRings)) * HEX_SIDE,
+        (y / (numRings)) * HEX_SIDE
+      ]);
+
+        // default hexagon: rotate to point-up
+      Pv = rotate2d(Pv, Math.PI/6);
+      const Tv3 = euclidean2torus(Pv);
+      this.torusCoords = Tv3.map(([t1,t2]) => [t1, t2]);
+      spacing = HEX_SIDE / numRings;
+      tri = constrainedDelaunay(Pv, spacing);
+    } else if (shape === 'rhombus') {
+      // Generate rhombus meshgrid in phase and Euclidean coords
+      const { phaseCoords, euclidCoords } = buildRhombusMeshGrid(numRings);
+      this.torusCoords = phaseCoords;
+      Pv = euclidCoords;
+      spacing = 1 / numRings;
+      tri = constrainedDelaunay(Pv, spacing);
+      // console.log(Pv);
     }
 
-    // triangulate without filtering
-    const spacing = HEX_SIDE / (numRings);
-    const tri = constrainedDelaunay(Pv, spacing);
+    // Store base euclidean coords before any transform applied
+    this.euclidCoords = Pv;
+
     // build BufferGeometry
     const geom = new THREE.BufferGeometry();
     const verts = [];
     Pv.forEach(([x,y]) => verts.push(x, 0, y));
     geom.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
     const indices = [];
-    tri.forEach(([i,j,k]) => indices.push(i-1,j-1,k-1));
+    tri.forEach(([i, j, k]) => {
+      // Convert 1-based Delaunay output to 0-based indices
+      indices.push(i - 1, j - 1, k - 1);
+    });
     geom.setIndex(indices);
     geom.computeVertexNormals();
-    // compute toroidal coords
-    const Tv3 = euclidean2torus(Pv);
-    this.torusCoords = Tv3.map(([t1,t2]) => [t1, t2]);
+
     this.scaleFactor    = options.scale    || (2 * Math.PI);
     this.positionOffset = options.position || [0, 0, 0];
 
@@ -192,6 +211,7 @@ export class GridTile {
 
     // share coords and geom
     c.torusCoords = this.torusCoords;
+    c.euclidCoords = this.euclidCoords;
     c.faceGeom    = this.faceGeom;
     c.wireGeom    = this.wireGeom;
     c.edgeGeom    = this.edgeGeom;

@@ -3,7 +3,7 @@ import { GUI } from 'dat.gui';
 import { EffectComposer, EffectPass, RenderPass, BloomEffect } from 'postprocessing';
 import { KernelSize } from 'postprocessing';
 import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus,
-         F01_morph, F12_morph, F23_morph, gridCellPdf } from './torusUtils.js';
+         F01_morph, F12_morph, F23_morph, gridCellPdf} from './torusUtils.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GridTile } from './GridTile.js';
 
@@ -49,6 +49,7 @@ const HEX_SIDE = 1 / Math.sqrt(3);
 const NGRID = 15;
 const SCALE = 2 * Math.PI;
 const NTILE_RINGS = 3;
+const POINT_SIZE = 3;
 // const NTILE_I = 50;
 
 // Rendering & data modes (manipulated via buttons)
@@ -92,14 +93,14 @@ orbitControls.dampingFactor = 0.1;
 // orbitControls.autoRotate = true;
 
 // --- Prepare geometry data -------------------------------------------
-// 1) Flat hexagon grid
-let Pv = gridNodes(NGRID)
-  .map(([x, y]) => [ x / (NGRID) * HEX_SIDE,
-                     y / (NGRID) * HEX_SIDE ]);
-Pv = rotate2d(Pv, Math.PI / 6);
+// // 1) Flat hexagon grid
+// let Pv = gridNodes(NGRID)
+//   .map(([x, y]) => [ x / (NGRID) * HEX_SIDE,
+//                      y / (NGRID) * HEX_SIDE ]);
+// Pv = rotate2d(Pv, Math.PI / 6);
 
-// 2) Toroidal phases (unwrapped)
-const Tv = euclidean2torus(Pv);  // [[t1,t2,t3],...]
+// // 2) Toroidal phases (unwrapped)
+// const Tv = euclidean2torus(Pv);  // [[t1,t2,t3],...]
 
 // // 3) Edge interpolation for hex tile boundary
 // const tileVerts = hexPhaseTile();
@@ -116,32 +117,11 @@ const Tv = euclidean2torus(Pv);  // [[t1,t2,t3],...]
 //   TtileI.push(pts);
 // }
 
-// 4) Simulated grid-cell PDFs at vertices
-const gridPhases = [
-  [0, 0.3],
-  [0.9, 0.35],
-  [0.6, 0.7]
-].map(([a, b]) => [a * HEX_SIDE, b * HEX_SIDE]);
-
-// Compute normalized PDF values per vertex for each grid cell
-const gridCellsRgbV = (() => {
-  // Compute and normalize PDF for each phase across all Pv points
-  const allNormPdfs = gridPhases.map(ph => {
-    const Z = gridCellPdf(Pv, ph, 0.1);
-    const maxZ = Math.max(...Z);
-    return Z.map(v => v / maxZ);
-  });
-  // Build [r,g,b] per vertex
-  return Pv.map((_, i) => [
-    allNormPdfs[0][i],
-    allNormPdfs[1][i],
-    allNormPdfs[2][i]
-  ]);
-})();
 
 // --- Create GridTile instances using template and static cloning ---
 // Template tile at origin; builds its own geometry internally
 const templateTile = new GridTile(NGRID, { position: [0, 0, 0], scale: SCALE, shape: 'hexagon' });
+const Pv = templateTile.euclidCoords;
 // templateTile.setTransform(pt => F01_morph(pt, 0));
 
 // Clone tiles for all centers (first is the central tile)
@@ -158,6 +138,23 @@ allTiles.forEach(tile => {
   tile.setVisibility(true);
   tile.setOpacity(1);
 });
+
+// // Debug: display every grid point as a white dot
+// allTiles.forEach(tile => {
+//   const ptsGeom = new THREE.BufferGeometry();
+//   // reuse the same positions as the face geometry
+//   ptsGeom.setAttribute(
+//     'position',
+//     tile.faceGeom.getAttribute('position')
+//   );
+//   const ptsMat = new THREE.PointsMaterial({
+//     color: 0xffffff,
+//     size: POINT_SIZE,
+//     sizeAttenuation: false
+//   });
+//   const pts = new THREE.Points(ptsGeom, ptsMat);
+//   tile.group.add(pts);
+// });
 
 // Lights
 scene.add(new THREE.AmbientLight(0xffffff, 3));
@@ -181,6 +178,30 @@ document.querySelectorAll('button').forEach(btn => {
   }
 });
 
+// Calculate grid-cell PDFs
+// 4) Simulated grid-cell PDFs at vertices
+const gridPhases = [
+  [0, 0.3],
+  [0.9, 0.35],
+  [0.6, 0.7]
+].map(([a, b]) => [a * HEX_SIDE, b * HEX_SIDE]);
+
+// Compute normalized PDF values per vertex for each grid cell
+const gridCellsRgbV = (() => {
+  // Compute and normalize PDF for each phase across all Pv points
+  const allNormPdfs = gridPhases.map(ph => {
+    const Z = gridCellPdf(Pv, ph, 0.1);
+    const maxZ = Math.max(...Z);
+    return Z.map(v => v / maxZ);
+  });
+  // Build [r,g,b] per vertex
+  return Pv.map((_, i) => [
+    allNormPdfs[0][i],
+    allNormPdfs[1][i],
+    allNormPdfs[2][i]
+  ]);
+})();
+
 
 function updateColors() {
   const N = Pv.length;
@@ -191,11 +212,16 @@ function updateColors() {
     // RGB from three normalized grid‐cell PDFs
     colorsArray = gridCellsRgbV;
   } else if (dataMode.startsWith('torus')) {
-    // HSV→RGB mapping of torus phase channel
-    const channel = parseInt(dataMode.slice(-1), 10) - 1; // 0,1,2
-    colorsArray = Tv.map(phases => {
-      // wrap phase to [0,2π), normalize to [0,1]
-      const h = ((((phases[channel] % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI)) / (2*Math.PI));
+    // HSV→RGB mapping of torus phase channel (including computed 3rd axis)
+    const channel = parseInt(dataMode.slice(-1), 10) - 1;
+    colorsArray = centralTile.torusCoords.map(([t1, t2]) => {
+      // compute third phase
+      const t3 = - (t1 + t2);
+      const phases = [t1, t2, t3];
+      // wrap and normalize selected channel
+      const raw = phases[channel];
+      const wrapped = ((raw % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI);
+      const h = wrapped / (2*Math.PI);
       return hsv2rgb(h, 1, 1);
     });
   } else {
@@ -322,6 +348,8 @@ function animate() {
       centralTile.setVisibility(true);
     }
     setMorph(F23_morph, t);
+    camera.fov = THREE.MathUtils.lerp(20, 10, t);
+    camera.updateProjectionMatrix();
 
   } else if (stage === 'holdEnd') {
     if (firstStep) {
@@ -329,7 +357,7 @@ function animate() {
       peripheralTiles.forEach(tile => tile.setVisibility(false));
     }
     setMorph(F23_morph, 1);
-    camera.fov = 20;
+    camera.fov = 10;
     camera.updateProjectionMatrix();
   }
 
