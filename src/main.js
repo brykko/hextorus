@@ -54,6 +54,17 @@ const POINT_SIZE = 3;
 
 // Rendering & data modes (manipulated via buttons)
 let dataMode      = 'torus1';   // 'torus1' | 'torus2' | 'torus3' | 'gridCells'
+let shapeMode = 'hexagon';     // 'hexagon' | 'rhombus'
+let allTiles = [], centralTile, peripheralTiles;
+
+// Predefined grid-cell phase offsets (normalized to hexagon side)
+const gridPhases = [
+  [0, 0.3],
+  [0.9, 0.35],
+  [0.6, 0.7]
+].map(([a, b]) => [a * HEX_SIDE, b * HEX_SIDE]);
+// gridCellsRgbV will be computed per-tile in rebuildTiles()
+let gridCellsRgbV;
 
 // --- Three.js setup --------------------------------------------------
 const scene    = new THREE.Scene();
@@ -118,44 +129,6 @@ orbitControls.dampingFactor = 0.1;
 // }
 
 
-// --- Create GridTile instances using template and static cloning ---
-// Template tile at origin; builds its own geometry internally
-const templateTile = new GridTile(NGRID, { position: [0, 0, 0], scale: SCALE, shape: 'hexagon' });
-const Pv = templateTile.euclidCoords;
-// templateTile.setTransform(pt => F01_morph(pt, 0));
-
-// Clone tiles for all centers (first is the central tile)
-const allTiles = GridTile.tile(templateTile, NTILE_RINGS, SCALE);
-const centralTile = allTiles[0];
-const peripheralTiles = allTiles.slice(1);
-// Add all tiles to the scene
-allTiles.forEach(tile => scene.add(tile.group));
-scene.add(centralTile.group);
-
-// Initialize visibility and opacity
-// centralTile.setVisibility(false);
-allTiles.forEach(tile => {
-  tile.setVisibility(true);
-  tile.setOpacity(1);
-});
-
-// // Debug: display every grid point as a white dot
-// allTiles.forEach(tile => {
-//   const ptsGeom = new THREE.BufferGeometry();
-//   // reuse the same positions as the face geometry
-//   ptsGeom.setAttribute(
-//     'position',
-//     tile.faceGeom.getAttribute('position')
-//   );
-//   const ptsMat = new THREE.PointsMaterial({
-//     color: 0xffffff,
-//     size: POINT_SIZE,
-//     sizeAttenuation: false
-//   });
-//   const pts = new THREE.Points(ptsGeom, ptsMat);
-//   tile.group.add(pts);
-// });
-
 // Lights
 scene.add(new THREE.AmbientLight(0xffffff, 3));
 
@@ -168,6 +141,14 @@ const controls = {
 gui.add(controls, 'data', ['torus1','torus2','torus3','gridCells'])
   .name('Data').onChange(v => { dataMode = v; updateColors(); });
 
+controls.shape = shapeMode;
+gui.add(controls, 'shape', ['hexagon','rhombus'])
+  .name('Shape')
+  .onChange(v => {
+    shapeMode = v;
+    rebuildTiles();
+  });
+
 // gui.add(controls, 'restart').name('Restart');
 
 // Bind top-left HTML Restart button (if present) to our restart action
@@ -178,33 +159,47 @@ document.querySelectorAll('button').forEach(btn => {
   }
 });
 
-// Calculate grid-cell PDFs
-// 4) Simulated grid-cell PDFs at vertices
-const gridPhases = [
-  [0, 0.3],
-  [0.9, 0.35],
-  [0.6, 0.7]
-].map(([a, b]) => [a * HEX_SIDE, b * HEX_SIDE]);
-
-// Compute normalized PDF values per vertex for each grid cell
-const gridCellsRgbV = (() => {
-  // Compute and normalize PDF for each phase across all Pv points
+// Rebuild tiles based on current shapeMode
+function rebuildTiles() {
+  // Remove old tiles
+  allTiles.forEach(tile => scene.remove(tile.group));
+  // Create new template with selected shape
+  const template = new GridTile(NGRID, {
+    position: [0, 0, 0],
+    scale: SCALE,
+    shape: shapeMode
+  });
+  // Clone for all centers
+  // console.log("template euclidCoords: ", template.euclidCoords);
+  allTiles = GridTile.tile(template, NTILE_RINGS);
+  centralTile = allTiles[0];
+  peripheralTiles = allTiles.slice(1);
+  // Add to scene and reset visibility/opacity
+  allTiles.forEach(tile => {
+    scene.add(tile.group);
+    tile.setVisibility(true);
+    tile.setOpacity(1);
+  });
+  // Compute grid-cell PDFs using the current central tile's Euclidean coords
+  const coords = centralTile.euclidCoords;
+  // Normalize each cell's PDF
   const allNormPdfs = gridPhases.map(ph => {
-    const Z = gridCellPdf(Pv, ph, 0.1);
+    const Z = gridCellPdf(coords, ph, 0.1);
     const maxZ = Math.max(...Z);
     return Z.map(v => v / maxZ);
   });
-  // Build [r,g,b] per vertex
-  return Pv.map((_, i) => [
+  // Build RGB array per vertex
+  gridCellsRgbV = coords.map((_, i) => [
     allNormPdfs[0][i],
     allNormPdfs[1][i],
     allNormPdfs[2][i]
   ]);
-})();
-
+  // Update colors on new tiles
+  updateColors();
+}
 
 function updateColors() {
-  const N = Pv.length;
+  const N = centralTile.euclidCoords.length;
 
   // Determine which vertex‐based data to use
   let colorsArray;
@@ -289,6 +284,7 @@ let stageStart = performance.now();
 let reverse = false;
 let firstStep = false;
 
+rebuildTiles();
 updateColors();
 onRestart();
 

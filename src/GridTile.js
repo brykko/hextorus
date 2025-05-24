@@ -62,6 +62,7 @@ export class GridTile {
 
     // Store base euclidean coords before any transform applied
     this.euclidCoords = Pv;
+    // console.log("this.euclidCoords:", this.euclidCoords);
 
     // build BufferGeometry
     const geom = new THREE.BufferGeometry();
