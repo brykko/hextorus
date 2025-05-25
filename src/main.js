@@ -46,7 +46,7 @@ const STAGE_DURATION = 3000; // ms per morph stage
 const STAGES = ['holdStart', 'fade', 'cylinder', 'twist', 'torus', 'holdEnd'];
 const FPS = 60;
 const HEX_SIDE = 1 / Math.sqrt(3);
-const NGRID = 15;
+const NGRID = 30;
 const SCALE = 2 * Math.PI;
 const NTILE_RINGS = 3;
 const POINT_SIZE = 3;
@@ -60,7 +60,7 @@ let allTiles = [], centralTile, peripheralTiles;
 // Predefined grid-cell phase offsets (normalized to hexagon side)
 const gridPhases = [
   [0, 0.3],
-  [0.9, 0.35],
+  [-0.4, 0],
   [0.6, 0.7]
 ].map(([a, b]) => [a * HEX_SIDE, b * HEX_SIDE]);
 // gridCellsRgbV will be computed per-tile in rebuildTiles()
@@ -175,11 +175,10 @@ function rebuildTiles() {
   centralTile = allTiles[0];
   peripheralTiles = allTiles.slice(1);
   // Add to scene and reset visibility/opacity
-  allTiles.forEach(tile => {
-    scene.add(tile.group);
-    tile.setVisibility(true);
-    tile.setOpacity(1);
-  });
+  allTiles.forEach(tile => {scene.add(tile.group)});
+  peripheralTiles.forEach(tile => {tile.showWireframe = false;})
+    // if (idx>0) {tile.showWireframe = false;}
+  // });
   // Compute grid-cell PDFs using the current central tile's Euclidean coords
   const coords = centralTile.euclidCoords;
   // Normalize each cell's PDF
@@ -268,6 +267,7 @@ function setMorph(fcn, t) {
 
 function onRestart() {
   centralTile.setVisibility(true);
+  centralTile.setOpacity(1);
   peripheralTiles.forEach(tile => {
     tile.setVisibility(true);
     tile.setOpacity(1);
@@ -288,8 +288,6 @@ rebuildTiles();
 updateColors();
 onRestart();
 
-// console.log(centralTile.faceMesh);
-
 function animate() {
   const now = performance.now();
   const dt  = now - stageStart;
@@ -305,10 +303,6 @@ function animate() {
     if (firstStep) {
       centralTile.setVisibility(true);
       setMorph(F01_morph, 0);
-      peripheralTiles.forEach(tile => {
-        tile.setVisibility(true);
-        tile.setOpacity(1);
-      });
       camera.fov = 40;
       camera.updateProjectionMatrix();
     }
