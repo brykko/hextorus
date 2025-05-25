@@ -113,16 +113,21 @@ export class GridTile {
     });
     this.wireMesh = new THREE.LineSegments(this.wireGeom, this.wireMat);
 
-    // Points
+    // Points mesh: render each vertex as a colored point
     this.pointsGeom = new THREE.BufferGeometry();
+    // share positions and colors with the face geometry
     this.pointsGeom.setAttribute('position', this.faceGeom.getAttribute('position'));
+    this.pointsGeom.setAttribute('color',    this.faceGeom.getAttribute('color'));
     this.pointsMat = new THREE.PointsMaterial({
-      vertexColors: true,
+      size: options.pointSize || 6,    // adjust as needed
+      sizeAttenuation: false,          // screen‐space points
+      vertexColors: true,              // use per-vertex color buffer
       transparent: true,
-      depthTest: true
-    })
-    // this.pointsMesh = new THREE.Points(this.pointsGeom, this.pointsMat);
-    console.log("pointsMesh:", this.pointsMesh);
+      depthTest: true,
+      depthWrite: false
+    });
+    this.pointsMesh = new THREE.Points(this.pointsGeom, this.pointsMat);
+    this.pointsMesh.renderOrder = 1;
 
     // // Boundary edges (unit hexagon) -> updated in setTransform
     // this.boundaryTP = hexPhaseTile();
@@ -139,13 +144,14 @@ export class GridTile {
     // Group all parts
     this.group = new THREE.Group();
     this.group.add(this.faceMesh, this.wireMesh, this.pointsMesh);
+    console.log(this.pointsMesh);
     this.setPosition(this.positionOffset);
     this.setScale(this.scaleFactor);
 
-    this.showFaces = true;
+    this.showFaces = false;
     this.showWireframe = true;
-    this.showPoints = false;
-    this.showTileEdges = false;
+    this.showPoints = true;
+    // this.showTileEdges = true;
 
     this.setOpacity(1);
     this.setVisibility(true);
@@ -174,9 +180,9 @@ export class GridTile {
   /** Show or hide all parts */
   setVisibility(visible) {
     // console.log(this.showFaces);
-    this.faceMat.visible = visible && this.showFaces;
-    this.wireMat.visible = visible && this.showWireframe;
-    this.pointsMat.visible = visible && this.showPoints;
+    this.faceMesh.visible = visible && this.showFaces;
+    this.wireMesh.visible = visible && this.showWireframe;
+    this.pointsMesh.visible = visible && this.showPoints;
     // this.edgeMesh.visible = visible && this.showTileEdges; // DEBUG: disable this for now
     this.visible = visible;
   }
@@ -247,12 +253,14 @@ export class GridTile {
     c.faceGeom    = this.faceGeom;
     c.wireGeom    = this.wireGeom;
     c.edgeGeom    = this.edgeGeom;
+    c.pointsGeom  = this.pointsGeom;
     if (deepCopy) {
       // Copying the geometry duplicates the underlying data
       // (which often we may not want)
       c.faceGeom = c.faceGeom.clone();
       c.wireGeom = c.wireGeom.clone();
       c.edgeGeom = c.edgeGeom.clone();
+      c.pointsGeom = c.pointsGeom.clone();
     }
 
     // share boundary coordinates and edge positions
