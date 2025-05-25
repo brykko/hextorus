@@ -165,7 +165,11 @@ export class GridTile {
       color: 0xffffff,
       side: THREE.DoubleSide,
       transparent: true,
-      depthWrite: false
+      depthWrite: false,
+      depthTest: false,
+      polygonOffset: true, 
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1
     });
     this.borderMesh   = new THREE.Mesh(this.borderGeom, this.borderMat);
 
@@ -205,6 +209,11 @@ export class GridTile {
     // Group all parts
     this.group = new THREE.Group();
     this.group.add(this.interiorMesh, this.borderMesh, this.wireMesh, this.pointsMesh);
+    // Disable frustum culling so tiles never vanish when near the edge of view
+    this.interiorMesh.frustumCulled = false;
+    this.borderMesh.frustumCulled   = false;
+    this.wireMesh.frustumCulled     = false;
+    this.pointsMesh.frustumCulled   = false;
     this.setPosition(this.positionOffset);
     this.setScale(this.scaleFactor);
 
@@ -243,7 +252,6 @@ export class GridTile {
     this.borderMesh.visible    = visible && this.showTileEdges;
     this.wireMesh.visible      = visible && this.showWireframe;
     this.pointsMesh.visible    = visible && this.showPoints;
-    // this.edgeMesh.visible = visible && this.showTileEdges; // DEBUG: disable this for now
     this.visible = visible;
   }
 
@@ -253,7 +261,6 @@ export class GridTile {
     this.borderMat.opacity = alpha;
     this.wireMat.opacity = alpha*0.1;
     this.pointsMat.opacity = alpha;
-    // this.edgeMat.opacity = alpha;
     this.opacity = alpha;
   }
 

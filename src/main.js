@@ -190,8 +190,7 @@ function rebuildTiles() {
     tile.setVisibility(peripheralTileVisibility);
     tile.setOpacity(peripheralTileOpacity);
   })
-    // if (idx>0) {tile.showWireframe = false;}
-  // });
+
   // Compute grid-cell PDFs using the current central tile's Euclidean coords
   const coords = centralTile.euclidCoords;
   // Normalize each cell's PDF
