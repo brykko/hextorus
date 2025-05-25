@@ -4,7 +4,7 @@ import { gridNodes, rotate2d, constrainedDelaunay, euclidean2torus } from './tor
 
 const HEX_SIDE = 1 / Math.sqrt(3);
 
-/**
+/*
  * GridTile encapsulates the mesh elements for one hexagonal tile,
  * including face mesh, wireframe, and boundary edges. You can apply
  * any transform function that maps a toroidal [t1,t2] to [x,y,z],
@@ -29,40 +29,67 @@ export class GridTile {
     * generate the rhombus tile coords.
     */
 
-    const shape = options.shape || 'hexagon';
+    this.shape = options.shape || 'hexagon';
+    this.seamType = options.seamType || 'overlapping'; // 'exact' or 'overlapping'
     let Pv;
     let spacing;
     let tri;
+    let scaleFactor;
 
-    if (shape === 'hexagon') {
+    // Two options exist for defining the tile edges (via option 'seamType')
+    //    'exact': tile edges meet precisely without gaps or overlap
+    //    'overlapping': tile is extended by 1/2 spacing, so that borders overlap
+    //
+    // The latter is useful when tessellating tiles, because the amount of overlap
+    // ensures that the border width remains the same when tiles are placed side
+    // by side. 
+    console.log('this.seamType = ', this.seamType);
+    if (this.seamType === 'overlapping'){
+      console.log('Overlapping seams...');
+      scaleFactor = 1 + (1/nGrid);
+      // const a = 1.2;
+      // Pv = Pv.map(([x, y]) => [x*a, y*a]);
+    } else {
+      scaleFactor = 1;
+    }
+
+    if (this.shape === 'hexagon') {
     // build Euclidean vertices for unit tile
-      const numRings = Math.ceil(nGrid / 2); 
-      Pv = gridNodes(numRings);
+      nGrid = Math.ceil(nGrid / 2); 
+      Pv = gridNodes(nGrid);
 
       // scale into world units
       Pv = Pv.map(([x, y]) => [
-        (x / (numRings)) * HEX_SIDE,
-        (y / (numRings)) * HEX_SIDE
+        (x / nGrid) * HEX_SIDE * scaleFactor,
+        (y / nGrid) * HEX_SIDE * scaleFactor
       ]);
 
         // default hexagon: rotate to point-up
       Pv = rotate2d(Pv, Math.PI/6);
       const Tv3 = euclidean2torus(Pv);
       this.torusCoords = Tv3.map(([t1,t2]) => [t1, t2]);
-      spacing = HEX_SIDE / numRings;
-      tri = constrainedDelaunay(Pv, spacing);
-    } else if (shape === 'rhombus') {
+      spacing = scaleFactor * HEX_SIDE / (nGrid);
+    } else if (this.shape === 'rhombus') {
       // Generate rhombus meshgrid in phase and Euclidean coords
-      const { phaseCoords, euclidCoords } = buildRhombusMeshGrid(nGrid);
-      this.torusCoords = phaseCoords;
-      Pv = euclidCoords;
-      spacing = 1 / nGrid;
-      tri = constrainedDelaunay(Pv, spacing);
+      let { phaseCoords, euclidCoords } = buildRhombusMeshGrid(nGrid);
+
+      this.torusCoords = phaseCoords.map(([t1, t2]) => [
+        t1 * scaleFactor,
+        t2 * scaleFactor
+      ]);
+      
+      Pv = euclidCoords.map(([x, y]) => [
+        x * scaleFactor,
+        y * scaleFactor
+      ]);
+
+      spacing = scaleFactor / nGrid;
     }
+
+    tri = constrainedDelaunay(Pv, spacing);
 
     // Store base euclidean coords before any transform applied
     this.euclidCoords = Pv;
-    // console.log("this.euclidCoords:", this.euclidCoords);
 
     // build BufferGeometry
     const geom = new THREE.BufferGeometry();
@@ -76,31 +103,77 @@ export class GridTile {
     });
     geom.setIndex(indices);
     geom.computeVertexNormals();
+    // Initialize shared color buffer on faceGeom
+    this.faceGeom = geom;
+    this._initColorAttribute();
+
+    // Split triangles into interior vs border based on border-vertex membership
+    const faceIdx = geom.index.array;
+    // Count edge occurrences
+    const edgeCount = new Map();
+    for (let i = 0; i < faceIdx.length; i += 3) {
+      const a = faceIdx[i], b = faceIdx[i+1], c = faceIdx[i+2];
+      [[a,b],[b,c],[c,a]].forEach(([u,v]) => {
+        const key = u < v ? `${u}_${v}` : `${v}_${u}`;
+        edgeCount.set(key, (edgeCount.get(key)||0) + 1);
+      });
+    }
+    // Find border vertices (vertices on any edge that occurs only once)
+    const borderVerts = new Set();
+    edgeCount.forEach((count, key) => {
+      if (count === 1) {
+        const [u,v] = key.split('_').map(Number);
+        borderVerts.add(u);
+        borderVerts.add(v);
+      }
+    });
+    // Partition triangles
+    const interiorIdx = [], borderIdx = [];
+    for (let i = 0; i < faceIdx.length; i += 3) {
+      const a = faceIdx[i], b = faceIdx[i+1], c = faceIdx[i+2];
+      if (borderVerts.has(a) || borderVerts.has(b) || borderVerts.has(c)) {
+        borderIdx.push(a, b, c);
+      }
+      interiorIdx.push(a, b, c);
+    }
+    // Build separate geometries
+    this.interiorGeom = new THREE.BufferGeometry();
+    this.interiorGeom.setAttribute('position', geom.getAttribute('position'));
+    this.interiorGeom.setAttribute('color',    geom.getAttribute('color'));
+    this.interiorGeom.setIndex(interiorIdx);
+    this.interiorGeom.computeVertexNormals();
+
+    this.borderGeom = new THREE.BufferGeometry();
+    this.borderGeom.setAttribute('position', geom.getAttribute('position'));
+    this.borderGeom.setAttribute('color',    geom.getAttribute('color'));
+    this.borderGeom.setIndex(borderIdx);
+    this.borderGeom.computeVertexNormals();
 
     this.scaleFactor    = options.scale    || (2 * Math.PI);
     this.positionOffset = options.position || [0, 0, 0];
 
-    // Face geometry with color placeholder
-    this.faceGeom = geom;
-    this._initColorAttribute();
-
-    // Face material & mesh
-    this.faceMat  = new THREE.MeshPhongMaterial({
+    // Material for data‐colored triangles
+    this.faceMat = new THREE.MeshPhongMaterial({
       side: THREE.DoubleSide,
       transparent: true,
       depthWrite: true,
-      vertexColors: true,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
+      vertexColors: true
     });
-    this.faceMesh = new THREE.Mesh(this.faceGeom, this.faceMat);
+    // Interior and border meshes
+    this.interiorMesh = new THREE.Mesh(this.interiorGeom, this.faceMat);
+    this.borderMat    = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false
+    });
+    this.borderMesh   = new THREE.Mesh(this.borderGeom, this.borderMat);
 
     // Wireframe geometry & mesh (line segments from triangles)
-    const faceIdx = this.faceGeom.index.array;
+    const faceIdx2 = this.faceGeom.index.array;
     const lineIndices = [];
-    for (let i = 0; i < faceIdx.length; i += 3) {
-      const a = faceIdx[i], b = faceIdx[i+1], c = faceIdx[i+2];
+    for (let i = 0; i < faceIdx2.length; i += 3) {
+      const a = faceIdx2[i], b = faceIdx2[i+1], c = faceIdx2[i+2];
       lineIndices.push(a, b, b, c, c, a);
     }
     this.wireGeom = new THREE.BufferGeometry();
@@ -129,29 +202,16 @@ export class GridTile {
     this.pointsMesh = new THREE.Points(this.pointsGeom, this.pointsMat);
     this.pointsMesh.renderOrder = 1;
 
-    // // Boundary edges (unit hexagon) -> updated in setTransform
-    // this.boundaryTP = hexPhaseTile();
-    // this.boundaryTP.push(this.boundaryTP[0]);
-    // this.edgeGeom   = new THREE.BufferGeometry();
-    // this.edgePos    = new Float32Array(this.boundaryTP.length * 3);
-    // this.edgeGeom.setAttribute('position', new THREE.Float32BufferAttribute(this.edgePos, 3));
-    // this.edgeMat    = new THREE.LineBasicMaterial({
-    //   color: 0xffffff,
-    //   transparent: true
-    // });
-    // this.edgeMesh   = new THREE.Line(this.edgeGeom, this.edgeMat);
-
     // Group all parts
     this.group = new THREE.Group();
-    this.group.add(this.faceMesh, this.wireMesh, this.pointsMesh);
-    console.log(this.pointsMesh);
+    this.group.add(this.interiorMesh, this.borderMesh, this.wireMesh, this.pointsMesh);
     this.setPosition(this.positionOffset);
     this.setScale(this.scaleFactor);
 
-    this.showFaces = false;
+    this.showFaces = true;
     this.showWireframe = true;
-    this.showPoints = true;
-    // this.showTileEdges = true;
+    this.showPoints = false;
+    this.showTileEdges = true;
 
     this.setOpacity(1);
     this.setVisibility(true);
@@ -179,10 +239,10 @@ export class GridTile {
 
   /** Show or hide all parts */
   setVisibility(visible) {
-    // console.log(this.showFaces);
-    this.faceMesh.visible = visible && this.showFaces;
-    this.wireMesh.visible = visible && this.showWireframe;
-    this.pointsMesh.visible = visible && this.showPoints;
+    this.interiorMesh.visible  = visible && this.showFaces;
+    this.borderMesh.visible    = visible && this.showTileEdges;
+    this.wireMesh.visible      = visible && this.showWireframe;
+    this.pointsMesh.visible    = visible && this.showPoints;
     // this.edgeMesh.visible = visible && this.showTileEdges; // DEBUG: disable this for now
     this.visible = visible;
   }
@@ -190,6 +250,7 @@ export class GridTile {
   /** Set opacity on all materials */
   setOpacity(alpha) {
     this.faceMat.opacity = alpha;
+    this.borderMat.opacity = alpha;
     this.wireMat.opacity = alpha*0.1;
     this.pointsMat.opacity = alpha;
     // this.edgeMat.opacity = alpha;
@@ -254,6 +315,8 @@ export class GridTile {
     c.wireGeom    = this.wireGeom;
     c.edgeGeom    = this.edgeGeom;
     c.pointsGeom  = this.pointsGeom;
+    c.interiorGeom = this.interiorGeom;
+    c.borderGeom = this.borderGeom;
     if (deepCopy) {
       // Copying the geometry duplicates the underlying data
       // (which often we may not want)
@@ -261,6 +324,8 @@ export class GridTile {
       c.wireGeom = c.wireGeom.clone();
       c.edgeGeom = c.edgeGeom.clone();
       c.pointsGeom = c.pointsGeom.clone();
+      c.interiorGeom = c.interiorGeom.clone();
+      c.borderGeom = c.borderGeom.clone();
     }
 
     // share boundary coordinates and edge positions
@@ -271,17 +336,20 @@ export class GridTile {
     c.faceMat     = this.faceMat.clone();
     c.wireMat     = this.wireMat.clone();
     c.pointsMat   = this.pointsMat.clone();
+    c.borderMat   = this.borderMat.clone();
     // c.edgeMat     = this.edgeMat.clone();
 
     // meshes
-    c.faceMesh    = new THREE.Mesh(c.faceGeom, c.faceMat);
+    c.interiorMesh = new THREE.Mesh(c.interiorGeom, c.faceMat);
+    c.borderMesh   = new THREE.Mesh(c.borderGeom, c.borderMat);
+    c.faceMesh    = null;
     c.wireMesh    = new THREE.LineSegments(c.wireGeom, c.wireMat);
     c.pointsMesh  = new THREE.Points(c.pointsGeom, c.pointsMat);
     // c.edgeMesh    = new THREE.Line(c.edgeGeom, c.edgeMat);
 
     // group
     c.group       = new THREE.Group();
-    c.group.add(c.faceMesh, c.wireMesh, c.pointsMesh);
+    c.group.add(c.interiorMesh, c.borderMesh, c.wireMesh, c.pointsMesh);
     
     // copy transforms
     c.scaleFactor    = this.scaleFactor;
@@ -295,7 +363,7 @@ export class GridTile {
     c.showFaces = this.showFaces;
     c.showWireframe = this.showWireframe;
     c.showPoints = this.showPoints;
-
+    c.showTileEdges = this.showTileEdges;
 
     return c;
   }

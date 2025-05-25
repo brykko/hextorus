@@ -48,7 +48,7 @@ const FPS = 60;
 const HEX_SIDE = 1 / Math.sqrt(3);
 const NGRID = 30;
 const SCALE = 2 * Math.PI;
-const NTILE_RINGS = 3;
+const NTILE_RINGS = 5;
 const POINT_SIZE = 3;
 // const NTILE_I = 50;
 
@@ -161,6 +161,16 @@ document.querySelectorAll('button').forEach(btn => {
 
 // Rebuild tiles based on current shapeMode
 function rebuildTiles() {
+
+  // Retreive the current state of the peripheral tiles, so we can re-apply 
+  // to the new tiles
+  let peripheralTileVisibility = true;
+  let peripheralTileOpacity = 1;
+  if (peripheralTiles) {
+    peripheralTileVisibility = peripheralTiles[0].visible;
+    peripheralTileOpacity = peripheralTiles[0].opacity;
+  }
+
   // Remove old tiles
   allTiles.forEach(tile => scene.remove(tile.group));
   // Create new template with selected shape
@@ -170,13 +180,16 @@ function rebuildTiles() {
     shape: shapeMode
   });
   // Clone for all centers
-  // console.log("template euclidCoords: ", template.euclidCoords);
   allTiles = GridTile.tile(template, NTILE_RINGS);
   centralTile = allTiles[0];
   peripheralTiles = allTiles.slice(1);
   // Add to scene and reset visibility/opacity
   allTiles.forEach(tile => {scene.add(tile.group)});
-  peripheralTiles.forEach(tile => {tile.showWireframe = false;})
+  peripheralTiles.forEach(tile => {
+    tile.showWireframe = false;
+    tile.setVisibility(peripheralTileVisibility);
+    tile.setOpacity(peripheralTileOpacity);
+  })
     // if (idx>0) {tile.showWireframe = false;}
   // });
   // Compute grid-cell PDFs using the current central tile's Euclidean coords
