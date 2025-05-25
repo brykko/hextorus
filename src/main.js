@@ -101,33 +101,6 @@ camera.lookAt(0, 0, 0);
 const orbitControls = new OrbitControls(camera, renderer.domElement);
 orbitControls.enableDamping = true;
 orbitControls.dampingFactor = 0.1;
-// orbitControls.autoRotate = true;
-
-// --- Prepare geometry data -------------------------------------------
-// // 1) Flat hexagon grid
-// let Pv = gridNodes(NGRID)
-//   .map(([x, y]) => [ x / (NGRID) * HEX_SIDE,
-//                      y / (NGRID) * HEX_SIDE ]);
-// Pv = rotate2d(Pv, Math.PI / 6);
-
-// // 2) Toroidal phases (unwrapped)
-// const Tv = euclidean2torus(Pv);  // [[t1,t2,t3],...]
-
-// // 3) Edge interpolation for hex tile boundary
-// const tileVerts = hexPhaseTile();
-// tileVerts.push(tileVerts[0]);
-// const TtileI = [];
-// for (let s = 0; s < 6; s++) {
-//   const p0 = tileVerts[s], p1 = tileVerts[s+1];
-//   const pts = [];
-//   for (let ii = 0; ii < NTILE_I; ii++) {
-//     const t = ii / (NTILE_I - 1);
-//     pts.push([ p0[0] * (1 - t) + p1[0] * t,
-//                p0[1] * (1 - t) + p1[1] * t ]);
-//   }
-//   TtileI.push(pts);
-// }
-
 
 // Lights
 scene.add(new THREE.AmbientLight(0xffffff, 3));
