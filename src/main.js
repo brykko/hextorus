@@ -39,8 +39,7 @@ function getStageDuration(stage) {
 }
 
 // --- Configuration --------------------------------------------------
-const WIDTH = 800;
-const HEIGHT = 600;
+const ASPECT_RATIO = 4/3; // width/height
 const STAGE_DURATION = 3000; // ms per morph stage
 // Animation stages: pause at start, fade, morph steps, pause at end
 const STAGES = ['holdStart', 'fade', 'cylinder', 'twist', 'torus', 'holdEnd'];
@@ -68,11 +67,9 @@ let gridCellsRgbV;
 
 // --- Three.js setup --------------------------------------------------
 const scene    = new THREE.Scene();
-const camera   = new THREE.PerspectiveCamera(50, WIDTH / HEIGHT, 0.1, 1000);
+const camera   = new THREE.PerspectiveCamera(50, ASPECT_RATIO, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 
-renderer.setSize(WIDTH, HEIGHT);
-renderer.setPixelRatio(window.devicePixelRatio);
 document.body.appendChild(renderer.domElement);
 
 // --- Postprocessing setup ---
@@ -105,7 +102,6 @@ orbitControls.dampingFactor = 0.1;
 
 // Lights
 scene.add(new THREE.AmbientLight(0xffffff, 3));
-
 // --- GUI controls ---
 const gui = new GUI();
 const controls = {
@@ -122,8 +118,6 @@ gui.add(controls, 'shape', ['hexagon','rhombus'])
     shapeMode = v;
     rebuildTiles();
   });
-
-// gui.add(controls, 'restart').name('Restart');
 
 // Bind top-left HTML Restart button (if present) to our restart action
 // N.B. this button is created in index.html, not in main.js
@@ -264,6 +258,16 @@ function onRestart() {
   stageStart = performance.now();
 }
 
+// --- Dynamic resizing ------------------------------------------------
+function onWindowResize() {
+  const cnt = renderer.domElement.parentElement || document.body;
+  const w = cnt.clientWidth;
+  // renderer.setSize(w, w/ASPECT_RATIO); // not necessary
+  renderer.setPixelRatio(window.devicePixelRatio);
+  composer.setSize(w, w/ASPECT_RATIO);
+}
+window.addEventListener('resize', onWindowResize);
+
 // --- Animation loop --------------------------------------------------
 let stageIndex = 0;
 let stageStart = performance.now();
@@ -273,6 +277,8 @@ let firstStep = false;
 rebuildTiles();
 updateColors();
 onRestart();
+onWindowResize();
+renderer.setPixelRatio(window.devicePixelRatio);
 
 function animate() {
   const now = performance.now();
